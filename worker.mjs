@@ -1,8 +1,4 @@
-// worker.mjs — front door (pattern from Tongits worker.mjs)
-//   /api/*  -> Hub DO
-//   /ws/room/:id -> ChatRoom DO
-//   static -> ASSETS
-
+// worker.mjs — front door
 export { Hub } from "./hub-do.mjs";
 export { ChatRoom } from "./room-do.mjs";
 
@@ -15,26 +11,27 @@ export default {
       return cors(new Response(null, { status: 204 }));
     }
 
-    // Room WebSocket
     if (path.startsWith("/ws/room/")) {
       const roomId = path.split("/").pop();
       if (!roomId) return new Response("missing room", { status: 400 });
-      const stub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
-      return stub.fetch(request);
+      return env.ROOMS.get(env.ROOMS.idFromName(roomId)).fetch(request);
     }
 
-    // API -> Hub DO (rewrite path without /api prefix)
     if (path.startsWith("/api/")) {
       const hub = env.HUB.get(env.HUB.idFromName("global"));
       const u = new URL(request.url);
       u.pathname = path.slice("/api".length) || "/";
       const hubReq = new Request(u.toString(), request);
 
-      // Special: post message goes to room DO then logs to hub
-      const msgMatch = path.match(/^\/api\/rooms\/([^/]+)\/messages$/);
-      if (msgMatch && request.method === "POST") {
+      // Message routes: /api/rooms/:id/messages[/:msgId[/(react|history)]]
+      const msgMatch = path.match(/^\/api\/rooms\/([^/]+)\/messages(?:\/([^/]+))?(?:\/(react|history))?$/);
+      if (msgMatch) {
         const roomId = msgMatch[1];
-        // Auth + membership via hub meta
+        const msgId = msgMatch[2];
+        const sub = msgMatch[3];
+        const method = request.method;
+
+        // Auth + room meta
         const metaUrl = new URL(request.url);
         metaUrl.pathname = "/rooms/" + roomId + "/meta";
         const metaRes = await hub.fetch(new Request(metaUrl.toString(), {
@@ -42,66 +39,135 @@ export default {
         }));
         const meta = await metaRes.json();
         if (!metaRes.ok) return cors(json(meta, metaRes.status));
-        if (!meta.user) return cors(json({ error: "Login required to post" }, 401));
-        if (meta.room.visibility === "private") {
-          const isMember = (meta.members || []).some((m) => m.id === meta.user.id);
-          if (!isMember && !meta.user.isAdmin) return cors(json({ error: "Private room" }, 403));
-        }
-        const body = await request.json().catch(() => ({}));
+
         const roomStub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
-        const postUrl = new URL(request.url);
-        postUrl.pathname = "/messages";
-        const postRes = await roomStub.fetch(new Request(postUrl.toString(), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: body.text, userId: meta.user.id, username: meta.user.username }),
-        }));
-        const msg = await postRes.json();
-        if (postRes.ok && msg.id) {
-          const logUrl = new URL(request.url);
-          logUrl.pathname = "/log-message";
-          await hub.fetch(new Request(logUrl.toString(), {
+        const auth = request.headers.get("Authorization") || "";
+
+        // GET list or single
+        if (method === "GET" && !sub) {
+          if (msgId) {
+            const r = await roomStub.fetch(new Request(new URL("/messages/" + msgId, request.url).toString()));
+            return cors(await r.json().then((d) => json(d, r.status)));
+          }
+          const listUrl = new URL(request.url);
+          listUrl.pathname = "/messages";
+          const listRes = await roomStub.fetch(new Request(listUrl.toString()));
+          let messages = await listRes.json();
+          if (meta.room.visibility === "registered" && !meta.user) {
+            messages = messages.map((m) => ({
+              ...m,
+              text: m.isDeleted ? "" : "•••••••• (login to read)",
+              username: m.isDeleted ? m.username : "•••",
+              reactions: {},
+              replyTo: null,
+            }));
+          }
+          return cors(json({ room: meta.room, messages, members: meta.members || [] }));
+        }
+
+        // GET history
+        if (method === "GET" && sub === "history" && msgId) {
+          const r = await roomStub.fetch(new Request(new URL("/messages/" + msgId + "/history", request.url).toString()));
+          return cors(await r.json().then((d) => json(d, r.status)));
+        }
+
+        // Need login for write ops
+        if (!meta.user) return cors(json({ error: "Login required" }, 401));
+        const level = meta.user.restrictionLevel | 0;
+
+        // Restriction level 2: cannot send/reply/react/edit
+        if (level >= 2 && method !== "GET") {
+          return cors(json({ error: "Your account is restricted from sending messages" }, 403));
+        }
+        // Level 1: can DM and read, but not post in non-private group rooms?
+        // Spec: "can still read users only rooms but cannot join the convo. BUT can still message other people."
+        // So level 1: block posting in public/registered rooms, allow private/DM
+        if (level === 1 && method === "POST" && !msgId && meta.room.visibility !== "private") {
+          return cors(json({ error: "You are restricted from posting in this room" }, 403));
+        }
+
+        // POST new message
+        if (method === "POST" && !msgId) {
+          if (meta.room.visibility === "private") {
+            const isMember = (meta.members || []).some((m) => m.id === meta.user.id);
+            if (!isMember && !meta.user.isAdmin) return cors(json({ error: "Private room" }, 403));
+          }
+          const body = await request.json().catch(() => ({}));
+          const postUrl = new URL(request.url);
+          postUrl.pathname = "/messages";
+          const postRes = await roomStub.fetch(new Request(postUrl.toString(), {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ id: msg.id, roomId, userId: meta.user.id, username: meta.user.username, text: msg.text }),
+            body: JSON.stringify({
+              text: body.text,
+              userId: meta.user.id,
+              username: meta.user.username,
+              replyToId: body.replyToId || null,
+              forward: body.forward || null,
+            }),
           }));
+          const msg = await postRes.json();
+          if (postRes.ok && msg.id) {
+            const logUrl = new URL(request.url);
+            logUrl.pathname = "/log-message";
+            await hub.fetch(new Request(logUrl.toString(), {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                id: msg.id, roomId, userId: meta.user.id,
+                username: meta.user.username, text: msg.text || "",
+              }),
+            }));
+          }
+          return cors(json(msg, postRes.status));
         }
-        return cors(json(msg, postRes.status));
-      }
 
-      // GET messages: meta from hub + messages from room
-      if (msgMatch && request.method === "GET") {
-        const roomId = msgMatch[1];
-        const metaUrl = new URL(request.url);
-        metaUrl.pathname = "/rooms/" + roomId + "/meta";
-        const metaRes = await hub.fetch(new Request(metaUrl.toString(), {
-          headers: { Authorization: request.headers.get("Authorization") || "" },
-        }));
-        const meta = await metaRes.json();
-        if (!metaRes.ok) return cors(json(meta, metaRes.status));
-        const roomStub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
-        const listUrl = new URL(request.url);
-        listUrl.pathname = "/messages";
-        const listRes = await roomStub.fetch(new Request(listUrl.toString()));
-        let messages = await listRes.json();
-        if (meta.room.visibility === "registered" && !meta.user) {
-          messages = messages.map((m) => ({ ...m, text: "•••••••• (login to read)", username: "•••" }));
+        // POST react
+        if (method === "POST" && sub === "react" && msgId) {
+          const body = await request.json().catch(() => ({}));
+          const r = await roomStub.fetch(new Request(new URL("/messages/" + msgId + "/react", request.url).toString(), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ emoji: body.emoji, userId: meta.user.id, username: meta.user.username }),
+          }));
+          return cors(await r.json().then((d) => json(d, r.status)));
         }
-        return cors(json({ room: meta.room, messages, members: meta.members || [] }));
+
+        // PATCH edit
+        if (method === "PATCH" && msgId && !sub) {
+          const body = await request.json().catch(() => ({}));
+          const r = await roomStub.fetch(new Request(new URL("/messages/" + msgId, request.url).toString(), {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ text: body.text, userId: meta.user.id }),
+          }));
+          return cors(await r.json().then((d) => json(d, r.status)));
+        }
+
+        // DELETE soft
+        if (method === "DELETE" && msgId && !sub) {
+          const r = await roomStub.fetch(new Request(new URL("/messages/" + msgId, request.url).toString(), {
+            method: "DELETE",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ userId: meta.user.id, isAdmin: !!meta.user.isAdmin }),
+          }));
+          return cors(await r.json().then((d) => json(d, r.status)));
+        }
+
+        return cors(json({ error: "Unknown message action" }, 404));
       }
 
       const res = await hub.fetch(hubReq);
       return cors(res);
     }
 
-    // Static assets
     if (env.ASSETS) {
       const res = await env.ASSETS.fetch(request);
       const ct = res.headers.get("content-type") || "";
       if (ct.includes("text/html")) {
-        const h = new Headers(res.headers);
-        h.set("cache-control", "no-cache, must-revalidate");
-        return new Response(res.body, { status: res.status, headers: h });
+        const headers = new Headers(res.headers);
+        headers.set("cache-control", "no-cache, must-revalidate");
+        return new Response(res.body, { status: res.status, headers });
       }
       return res;
     }
@@ -115,7 +181,7 @@ function json(obj, status = 200) {
 function cors(res) {
   const h = new Headers(res.headers);
   h.set("access-control-allow-origin", "*");
-  h.set("access-control-allow-methods", "GET,POST,DELETE,OPTIONS");
+  h.set("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS");
   h.set("access-control-allow-headers", "content-type,authorization");
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h, webSocket: res.webSocket });
 }

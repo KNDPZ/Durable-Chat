@@ -3,6 +3,10 @@ let token = localStorage.getItem("dc_token") || null;
 let me = null, currentRoom = null, currentMembers = [], ws = null;
 let pendingSecret = null, pendingUsername = null, myContacts = [];
 let selectedCreateMembers = new Set();
+let replyToMsg = null;
+let forwardMsg = null;
+let reportTargetId = null;
+const REACTIONS = ["👍","👎","❤️","😂","😢","😠","🖕"];
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
@@ -167,7 +171,7 @@ $$(".sub-tab").forEach((st) => {
   st.onclick = () => {
     $$(".sub-tab").forEach((t) => t.classList.remove("active"));
     st.classList.add("active");
-    ["online", "users", "admins", "lookup"].forEach((p) => {
+    ["online", "users", "admins", "lookup", "reports"].forEach((p) => {
       const el = $("#admin-" + p);
       if (el) el.style.display = st.dataset.admin === p ? "block" : "none";
     });
@@ -180,6 +184,27 @@ async function loadAdminPanel(which) {
   if (!el || which === "lookup") return;
   el.innerHTML = '<div class="empty">Loading…</div>';
   try {
+    if (which === "reports") {
+      const reports = await api("/admin/reports");
+      if (!reports.length) { el.innerHTML = '<div class="empty">No reports</div>'; return; }
+      el.innerHTML = reports.map((r) =>
+        `<div class="item report-row" style="flex-direction:column;align-items:stretch;gap:6px">
+          <div style="display:flex;justify-content:space-between;width:100%">
+            <div><strong>@${esc(r.reported.username)}</strong> reported by @${esc(r.reporter.username)}
+              ${r.resolved ? ' <span class="badge">resolved</span>' : ' <span class="badge badge-private">open</span>'}
+              ${r.reported.restrictionLevel ? ' <span class="badge badge-private">R'+r.reported.restrictionLevel+'</span>' : ""}
+            </div>
+            <button class="btn btn-sm" data-id="${r.reported.id}">View</button>
+          </div>
+          <div style="font-size:.85rem;color:var(--muted)">${esc(r.reason)}</div>
+          <div style="font-size:.75rem;color:var(--muted)">${new Date(r.createdAt).toLocaleString()}</div>
+        </div>`
+      ).join("");
+      el.querySelectorAll("button[data-id]").forEach((btn) => {
+        btn.onclick = (e) => { e.stopPropagation(); openAdminUser(btn.dataset.id); };
+      });
+      return;
+    }
     const path = which === "online" ? "/admin/online" : which === "admins" ? "/admin/admins" : "/admin/users";
     const users = await api(path);
     if (!users.length) { el.innerHTML = '<div class="empty">None</div>'; return; }
@@ -330,15 +355,221 @@ $("#manageMembersBtn").onclick = async () => {
   } catch (e) { showError(e.message); }
 };
 
+
 function renderMessages(messages, blur) {
   const box = $("#messages");
-  box.innerHTML = messages.map((m) =>
-    `<div class="msg ${me && m.userId === me.id ? "mine" : ""} ${blur ? "blurred" : ""}">
-      <div class="meta">@${esc(m.username)} · ${new Date(m.createdAt).toLocaleString()}</div>
-      <div>${esc(m.text)}</div></div>`
-  ).join("");
+  box.innerHTML = messages.map((m) => messageHtml(m, blur)).join("");
   box.scrollTop = box.scrollHeight;
+  bindMessageActions(box);
 }
+
+function messageHtml(m, blur) {
+  if (m.isDeleted) {
+    return `<div class="msg deleted" id="msg-${m.id}" data-id="${m.id}">
+      <div class="meta">@${esc(m.username)} · ${new Date(m.createdAt).toLocaleString()}</div>
+      <div>This message has been deleted</div></div>`;
+  }
+  const mine = me && m.userId === me.id;
+  let html = `<div class="msg ${mine ? "mine" : ""} ${blur ? "blurred" : ""}" id="msg-${m.id}" data-id="${m.id}" data-user="${m.userId}">`;
+  if (m.forward) {
+    html += `<div class="forward-badge">Forwarded from ${esc(m.forward.roomName || "a room")} · @${esc(m.forward.username || "?")}
+      <a href="#" class="goto-source" data-room="${m.forward.roomId || ""}" data-msg="${m.forward.messageId || ""}" style="color:var(--accent)">View source</a></div>`;
+  }
+  if (m.replyTo) {
+    html += `<div class="reply-preview" data-goto="${m.replyTo.id}"><strong>@${esc(m.replyTo.username)}</strong> ${esc(m.replyTo.text)}</div>`;
+  }
+  html += `<div class="meta">@${esc(m.username)} · ${new Date(m.createdAt).toLocaleString()}</div>`;
+  html += `<div class="msg-body">${esc(m.text)}</div>`;
+  if (m.editedAt) {
+    html += `<div class="edited-label" data-history="${m.id}">edited</div>`;
+  }
+  // reactions
+  const rx = m.reactions || {};
+  const chips = Object.keys(rx).map((emoji) => {
+    const users = rx[emoji] || [];
+    const isMine = me && users.some((u) => u.userId === me.id);
+    const names = users.map((u) => "@" + u.username).join(", ");
+    return `<span class="reaction-chip ${isMine ? "mine" : ""}" data-react="${emoji}" data-id="${m.id}">
+      ${emoji} ${users.length}<span class="tip">${esc(names) || "No one"}</span></span>`;
+  }).join("");
+  if (chips) html += `<div class="reactions">${chips}</div>`;
+  if (!blur && me) {
+    html += `<div class="msg-actions">
+      <button data-act="reply" data-id="${m.id}">Reply</button>
+      <button data-act="react" data-id="${m.id}">React</button>
+      ${currentRoom && currentRoom.visibility === "public" ? `<button data-act="forward" data-id="${m.id}">Forward</button>` : ""}
+      ${mine ? `<button data-act="edit" data-id="${m.id}">Edit</button><button data-act="delete" data-id="${m.id}">Delete</button>` : ""}
+    </div>
+    <div class="emoji-picker" id="picker-${m.id}" style="display:none">
+      ${REACTIONS.map((e) => `<button data-emoji="${e}" data-id="${m.id}">${e}</button>`).join("")}
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function bindMessageActions(box) {
+  box.querySelectorAll("[data-act]").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const act = btn.dataset.act;
+      const el = document.getElementById("msg-" + id);
+      if (act === "reply") {
+        const body = el?.querySelector(".msg-body")?.textContent || "";
+        const user = el?.querySelector(".meta")?.textContent?.split("·")[0]?.replace("@","").trim() || "";
+        replyToMsg = { id, username: user, text: body };
+        $("#replyToName").textContent = "@" + user;
+        $("#replyToText").textContent = body.slice(0, 100);
+        $("#replyBar").classList.add("open");
+        $("#msgInput").focus();
+      } else if (act === "react") {
+        const p = document.getElementById("picker-" + id);
+        if (p) p.style.display = p.style.display === "none" ? "flex" : "none";
+      } else if (act === "forward") {
+        openForward(id);
+      } else if (act === "edit") {
+        const body = el?.querySelector(".msg-body")?.textContent || "";
+        const next = prompt("Edit message:", body);
+        if (next == null || next.trim() === body) return;
+        api("/rooms/" + currentRoom.id + "/messages/" + id, {
+          method: "PATCH",
+          body: JSON.stringify({ text: next.trim() }),
+        }).then((msg) => upsertMessage(msg)).catch((err) => showError(err.message));
+      } else if (act === "delete") {
+        if (!confirm("Delete this message?")) return;
+        api("/rooms/" + currentRoom.id + "/messages/" + id, {
+          method: "DELETE",
+          body: JSON.stringify({}),
+        }).then((msg) => upsertMessage(msg)).catch((err) => showError(err.message));
+      }
+    };
+  });
+  box.querySelectorAll(".emoji-picker button").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      api("/rooms/" + currentRoom.id + "/messages/" + btn.dataset.id + "/react", {
+        method: "POST",
+        body: JSON.stringify({ emoji: btn.dataset.emoji }),
+      }).then((msg) => {
+        upsertMessage(msg);
+        const p = document.getElementById("picker-" + btn.dataset.id);
+        if (p) p.style.display = "none";
+      }).catch((err) => showError(err.message));
+    };
+  });
+  box.querySelectorAll(".reaction-chip").forEach((chip) => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      api("/rooms/" + currentRoom.id + "/messages/" + chip.dataset.id + "/react", {
+        method: "POST",
+        body: JSON.stringify({ emoji: chip.dataset.react }),
+      }).then((msg) => upsertMessage(msg)).catch((err) => showError(err.message));
+    };
+  });
+  box.querySelectorAll(".reply-preview").forEach((el) => {
+    el.onclick = () => scrollToMessage(el.dataset.goto);
+  });
+  box.querySelectorAll(".edited-label").forEach((el) => {
+    el.onclick = async () => {
+      try {
+        const hist = await api("/rooms/" + currentRoom.id + "/messages/" + el.dataset.history + "/history");
+        $("#editHistoryList").innerHTML = hist.length
+          ? hist.map((h) => `<div class="history-msg"><div class="history-meta">${new Date(h.editedAt).toLocaleString()}</div><div>${esc(h.text)}</div></div>`).join("")
+          : '<div class="empty">No history</div>';
+        $("#editHistoryModal").style.display = "flex";
+      } catch (err) { showError(err.message); }
+    };
+  });
+  box.querySelectorAll(".goto-source").forEach((a) => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      if (a.dataset.room) openRoom(a.dataset.room).then(() => {
+        if (a.dataset.msg) setTimeout(() => scrollToMessage(a.dataset.msg), 300);
+      });
+    };
+  });
+}
+
+function upsertMessage(msg) {
+  const existing = document.getElementById("msg-" + msg.id);
+  const box = $("#messages");
+  const html = messageHtml(msg, false);
+  if (existing) {
+    existing.outerHTML = html;
+  } else {
+    box.insertAdjacentHTML("beforeend", html);
+    box.scrollTop = box.scrollHeight;
+  }
+  bindMessageActions(box);
+}
+
+function scrollToMessage(id) {
+  const el = document.getElementById("msg-" + id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.classList.remove("highlight");
+  void el.offsetWidth;
+  el.classList.add("highlight");
+  setTimeout(() => el.classList.remove("highlight"), 1600);
+}
+
+async function openForward(msgId) {
+  if (!currentRoom || currentRoom.visibility !== "public") {
+    showError("Can only forward from public rooms");
+    return;
+  }
+  const el = document.getElementById("msg-" + msgId);
+  forwardMsg = {
+    id: msgId,
+    text: el?.querySelector(".msg-body")?.textContent || "",
+    username: el?.querySelector(".meta")?.textContent?.split("·")[0]?.replace("@","").trim() || "",
+    roomId: currentRoom.id,
+    roomName: currentRoom.name,
+  };
+  // grab reactions from DOM tips is hard; re-fetch
+  try {
+    const full = await api("/rooms/" + currentRoom.id + "/messages/" + msgId);
+    forwardMsg.reactions = full.reactions || {};
+    if (full.replyTo) forwardMsg.replyTo = full.replyTo;
+  } catch {}
+  if (!myContacts.length) myContacts = await api("/contacts").catch(() => []);
+  const list = $("#forwardContactList");
+  if (!myContacts.length) {
+    list.innerHTML = '<div class="empty">No contacts to forward to</div>';
+  } else {
+    list.innerHTML = myContacts.map((c) =>
+      `<div class="item"><div>@${esc(c.user.username)}</div>
+       <button class="btn btn-sm fwd-to" data-id="${c.user.id}">Send</button></div>`
+    ).join("");
+    list.querySelectorAll(".fwd-to").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          const room = await api("/dm", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
+          await api("/rooms/" + room.id + "/messages", {
+            method: "POST",
+            body: JSON.stringify({
+              text: forwardMsg.text,
+              forward: {
+                roomId: forwardMsg.roomId,
+                messageId: forwardMsg.id,
+                roomName: forwardMsg.roomName,
+                username: forwardMsg.username,
+                text: forwardMsg.text,
+                reactions: forwardMsg.reactions,
+              },
+            }),
+          });
+          $("#forwardModal").style.display = "none";
+          openRoom(room.id);
+        } catch (err) { showError(err.message); }
+      };
+    });
+  }
+  $("#forwardModal").style.display = "flex";
+}
+
+
 function connectWS(roomId) {
   if (ws) try { ws.close(); } catch {}
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -347,13 +578,9 @@ function connectWS(roomId) {
     try {
       const data = JSON.parse(ev.data);
       if (data.t === "message" || data.type === "message") {
-        const m = data.message;
-        const box = $("#messages");
-        const div = document.createElement("div");
-        div.className = "msg" + (me && m.userId === me.id ? " mine" : "");
-        div.innerHTML = `<div class="meta">@${esc(m.username)} · just now</div><div>${esc(m.text)}</div>`;
-        box.appendChild(div);
-        box.scrollTop = box.scrollHeight;
+        upsertMessage(data.message);
+      } else if (data.t === "message_update") {
+        upsertMessage(data.message);
       }
     } catch {}
   };
@@ -371,10 +598,25 @@ async function sendMsg() {
   const text = $("#msgInput").value.trim();
   if (!text || !currentRoom) return;
   try {
-    await api("/rooms/" + currentRoom.id + "/messages", { method: "POST", body: JSON.stringify({ text }) });
+    const body = { text };
+    if (replyToMsg) body.replyToId = replyToMsg.id;
+    await api("/rooms/" + currentRoom.id + "/messages", { method: "POST", body: JSON.stringify(body) });
     $("#msgInput").value = "";
+    replyToMsg = null;
+    $("#replyBar").classList.remove("open");
   } catch (e) { showError(e.message); }
 }
+$("#cancelReply").onclick = () => { replyToMsg = null; $("#replyBar").classList.remove("open"); };
+$("#cancelForward").onclick = () => { $("#forwardModal").style.display = "none"; };
+$("#closeEditHistory").onclick = () => { $("#editHistoryModal").style.display = "none"; };
+$("#cancelReport").onclick = () => { $("#reportModal").style.display = "none"; };
+$("#submitReport").onclick = async () => {
+  try {
+    await api("/report", { method: "POST", body: JSON.stringify({ userId: reportTargetId, reason: $("#reportReason").value.trim() }) });
+    $("#reportModal").style.display = "none";
+    showError("Report submitted"); // reuse banner as soft notice
+  } catch (e) { showError(e.message); }
+};
 
 let searchTimer;
 $("#searchInput").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 300); };
@@ -506,6 +748,51 @@ async function openAdminUser(userId) {
       } catch (e) { showError(e.message); }
     };
     actions.appendChild(recoverBtn);
+    // Report (any admin)
+    if (me && me.isAdmin && data.user.username !== "admin") {
+      const reportBtn = document.createElement("button");
+      reportBtn.className = "btn btn-sm";
+      reportBtn.style.cssText = "background:var(--surface2);color:var(--text);border:1px solid var(--border)";
+      reportBtn.textContent = "Report";
+      reportBtn.onclick = () => {
+        reportTargetId = data.user.id;
+        $("#reportUsername").textContent = data.user.username;
+        $("#reportReason").value = "";
+        $("#adminUserModal").style.display = "none";
+        $("#reportModal").style.display = "flex";
+      };
+      actions.appendChild(reportBtn);
+    }
+    // Primary admin only: restrict / delete
+    if (me && me.username === "admin" && data.user.username !== "admin") {
+      const lv = data.user.restrictionLevel | 0;
+      [0, 1, 2].forEach((level) => {
+        const b = document.createElement("button");
+        b.className = "btn btn-sm" + (lv === level ? "" : "");
+        b.style.cssText = lv === level ? "outline:2px solid var(--accent)" : "background:var(--surface2);color:var(--text);border:1px solid var(--border)";
+        b.textContent = level === 0 ? "Unrestrict" : ("Restrict L" + level);
+        b.title = level === 0 ? "Clear restrictions" : level === 1 ? "Can read registered rooms but not post in public; can DM" : "Can receive but not send messages";
+        b.onclick = async () => {
+          try {
+            await api("/admin/user/" + data.user.id + "/restrict", { method: "POST", body: JSON.stringify({ level }) });
+            openAdminUser(data.user.id);
+          } catch (err) { showError(err.message); }
+        };
+        actions.appendChild(b);
+      });
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn btn-sm btn-danger";
+      delBtn.textContent = "Delete user";
+      delBtn.onclick = async () => {
+        if (!confirm("Permanently delete @" + data.user.username + "? This cannot be undone.")) return;
+        try {
+          await api("/admin/user/" + data.user.id, { method: "DELETE" });
+          $("#adminUserModal").style.display = "none";
+          loadAdminPanel("users");
+        } catch (err) { showError(err.message); }
+      };
+      actions.appendChild(delBtn);
+    }
     $("#adminContacts").innerHTML = data.contacts.length
       ? data.contacts.map((c) => `<div class="item" style="cursor:default"><strong>@${esc(c.user.username)}</strong>${c.isFriend ? ' <span class="badge badge-friend">Friends</span>' : ""}</div>`).join("")
       : '<div class="empty" style="padding:16px">No contacts</div>';

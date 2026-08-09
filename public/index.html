@@ -54,6 +54,28 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
 .user-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);padding:4px 10px;border-radius:999px;font-size:.85rem}
 .contact-actions{display:flex;gap:6px}.blurred{filter:blur(4px);user-select:none}
 .history-msg{padding:10px 0;border-bottom:1px solid var(--border);font-size:.88rem}.history-meta{font-size:.75rem;color:var(--muted)}
+
+.msg-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;opacity:.7}
+.msg-actions button{background:transparent;color:var(--muted);padding:2px 6px;font-size:.75rem;border-radius:6px}
+.msg-actions button:hover{background:var(--surface);color:var(--text)}
+.msg.deleted{opacity:.6;font-style:italic;color:var(--muted)}
+.msg .edited-label{font-size:.7rem;font-style:italic;color:var(--muted);cursor:pointer;margin-top:4px}
+.msg .edited-label:hover{text-decoration:underline}
+.msg .reply-preview{border-left:3px solid var(--accent);padding:4px 8px;margin-bottom:6px;font-size:.8rem;color:var(--muted);cursor:pointer;background:rgba(99,102,241,.08);border-radius:0 6px 6px 0}
+.msg .forward-badge{font-size:.72rem;color:var(--muted);margin-bottom:4px}
+.msg .reactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.msg .reaction-chip{background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:.8rem;cursor:pointer;position:relative}
+.msg .reaction-chip.mine{border-color:var(--accent);background:rgba(99,102,241,.15)}
+.msg .reaction-chip .tip{display:none;position:absolute;bottom:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.75rem;white-space:nowrap;z-index:5;margin-bottom:4px}
+.msg .reaction-chip:hover .tip{display:block}
+.msg.highlight{animation:pulseHighlight 1.6s ease}
+@keyframes pulseHighlight{0%{box-shadow:0 0 0 0 rgba(99,102,241,.7)}50%{box-shadow:0 0 0 8px rgba(99,102,241,.2)}100%{box-shadow:0 0 0 0 transparent}}
+.reply-bar{display:none;padding:8px 16px;background:var(--surface2);border-top:1px solid var(--border);font-size:.85rem;align-items:center;gap:10px}
+.reply-bar.open{display:flex}
+.report-row{border-left:3px solid var(--danger)}
+.emoji-picker{display:flex;gap:4px;flex-wrap:wrap;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.emoji-picker button{font-size:1.1rem;padding:4px 6px;background:transparent}
+
 </style>
 </head>
 <body>
@@ -104,6 +126,7 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
         <button class="sub-tab" data-admin="users">All users</button>
         <button class="sub-tab" data-admin="admins">Admins</button>
         <button class="sub-tab" data-admin="lookup">Lookup</button>
+        <button class="sub-tab" data-admin="reports">Reports</button>
       </div>
       <div id="admin-online" class="card"><div class="empty">Loading…</div></div>
       <div id="admin-users" class="card" style="display:none"></div>
@@ -112,6 +135,7 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
         <div class="field" style="margin-bottom:16px"><input id="adminSearchInput" placeholder="Search username…"/></div>
         <div class="card" id="adminSearchResults"><div class="empty">Type to search</div></div>
       </div>
+      <div id="admin-reports" class="card" style="display:none"><div class="empty">Loading…</div></div>
     </div>
   </div>
   <div id="view-room" style="display:none">
@@ -126,6 +150,11 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
       </div>
       <div id="membersBar" style="display:none;padding:8px 16px;border-bottom:1px solid var(--border)"></div>
       <div class="messages" id="messages"></div>
+      <div class="reply-bar" id="replyBar">
+        <div style="flex:1"><strong>Replying to <span id="replyToName"></span></strong>
+          <div id="replyToText" style="color:var(--muted);font-size:.8rem"></div></div>
+        <button class="btn-ghost btn-sm" id="cancelReply">✕</button>
+      </div>
       <div class="chat-input" id="chatInputRow">
         <input id="msgInput" placeholder="Type a message…" maxlength="2000"/>
         <button class="btn" id="sendBtn">Send</button>
@@ -211,6 +240,25 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
   <div id="recoverQr"></div>
   <div class="secret-box" id="recoverSecret"></div>
   <div class="modal-actions"><button class="btn" id="closeRecover">Done</button></div>
+</div></div>
+
+
+<div class="modal-backdrop" id="reportModal" style="display:none"><div class="modal">
+  <h2>Report user</h2>
+  <p>Reporting <strong id="reportUsername"></strong>. They will not be notified.</p>
+  <div class="field"><label>Reason</label><textarea id="reportReason" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:inherit"></textarea></div>
+  <div class="modal-actions"><button class="btn-ghost" id="cancelReport">Cancel</button><button class="btn btn-danger" id="submitReport">Submit report</button></div>
+</div></div>
+<div class="modal-backdrop" id="forwardModal" style="display:none"><div class="modal">
+  <h2>Forward message</h2>
+  <p>Choose a contact to DM this message to.</p>
+  <div id="forwardContactList" class="card" style="max-height:240px;overflow:auto"></div>
+  <div class="modal-actions"><button class="btn-ghost" id="cancelForward">Cancel</button></div>
+</div></div>
+<div class="modal-backdrop" id="editHistoryModal" style="display:none"><div class="modal">
+  <h2>Edit history</h2>
+  <div id="editHistoryList"></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeEditHistory">Close</button></div>
 </div></div>
 
 <script src="/app.js"></script>

@@ -62,11 +62,20 @@ export class Hub {
         );
         CREATE INDEX IF NOT EXISTS idx_msg_user ON message_log(user_id);
         CREATE INDEX IF NOT EXISTS idx_last_seen ON users(last_seen);
+        CREATE TABLE IF NOT EXISTS reports (
+          id TEXT PRIMARY KEY,
+          reporter_id TEXT NOT NULL,
+          reported_id TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          resolved INTEGER NOT NULL DEFAULT 0
+        );
       `);
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN last_seen TEXT"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN allow_members_invite INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN invite_degree TEXT NOT NULL DEFAULT 'contacts'"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN restriction_level INTEGER NOT NULL DEFAULT 0"); } catch {}
       this.state.storage.sql.exec("UPDATE users SET is_admin = 1 WHERE username = 'admin'");
     });
   }
@@ -76,7 +85,15 @@ export class Hub {
   toUser(r) {
     if (!r) return null;
     const online = r.last_seen ? Date.now() - new Date(r.last_seen).getTime() < ONLINE_MS : false;
-    return { id: r.id, username: r.username, createdAt: r.created_at, isAdmin: !!r.is_admin, online };
+    return {
+      id: r.id,
+      username: r.username,
+      createdAt: r.created_at,
+      isAdmin: !!r.is_admin,
+      isPrimaryAdmin: r.username === "admin",
+      online,
+      restrictionLevel: r.restriction_level | 0,
+    };
   }
 
   toRoom(r) {
@@ -293,7 +310,82 @@ export class Hub {
           this.sql("DELETE FROM sessions WHERE user_id = ?", recover[1]);
           return j({ secret, otpauthUrl: otpauthUrl(u.username, secret), username: u.username });
         }
+        // Primary admin only: restrict user (0=none, 1=no join public convo, 2=receive only, 3=deleted flag before hard delete)
+        const restrict = path.match(/^\/admin\/user\/([^/]+)\/restrict$/);
+        if (restrict && method === "POST") {
+          if (me.username !== "admin") return jerr("Primary admin only", 403);
+          const level = Math.max(0, Math.min(2, body.level | 0));
+          const target = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", restrict[1]).toArray()[0]);
+          if (!target) return jerr("User not found");
+          if (target.username === "admin") return jerr("Cannot restrict primary admin");
+          this.sql("UPDATE users SET restriction_level = ? WHERE id = ?", level, restrict[1]);
+          return j({ ok: true, restrictionLevel: level });
+        }
+        // Primary admin only: hard delete user
+        const delUser = path.match(/^\/admin\/user\/([^/]+)$/);
+        if (delUser && method === "DELETE") {
+          if (me.username !== "admin") return jerr("Primary admin only", 403);
+          const target = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", delUser[1]).toArray()[0]);
+          if (!target) return jerr("User not found");
+          if (target.username === "admin") return jerr("Cannot delete primary admin");
+          const uid = delUser[1];
+          this.sql("DELETE FROM sessions WHERE user_id = ?", uid);
+          this.sql("DELETE FROM contacts WHERE owner_id = ? OR contact_id = ?", uid, uid);
+          this.sql("DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?", uid, uid);
+          this.sql("DELETE FROM room_members WHERE user_id = ?", uid);
+          this.sql("DELETE FROM reports WHERE reporter_id = ? OR reported_id = ?", uid, uid);
+          this.sql("DELETE FROM users WHERE id = ?", uid);
+          return j({ ok: true });
+        }
+        // Reports list (admins)
+        if (path === "/admin/reports" && method === "GET") {
+          const rows = this.sql(`
+            SELECT r.id, r.reason, r.created_at, r.resolved,
+                   ru.username AS reporter_username, ru.id AS reporter_id,
+                   du.username AS reported_username, du.id AS reported_id,
+                   du.restriction_level
+            FROM reports r
+            JOIN users ru ON ru.id = r.reporter_id
+            JOIN users du ON du.id = r.reported_id
+            ORDER BY r.resolved ASC, r.created_at DESC
+            LIMIT 200
+          `).toArray();
+          return j(rows.map((r) => ({
+            id: r.id,
+            reason: r.reason,
+            createdAt: r.created_at,
+            resolved: !!r.resolved,
+            reporter: { id: r.reporter_id, username: r.reporter_username },
+            reported: {
+              id: r.reported_id,
+              username: r.reported_username,
+              restrictionLevel: r.restriction_level | 0,
+            },
+          })));
+        }
+        if (path.match(/^\/admin\/reports\/[^/]+\/resolve$/) && method === "POST") {
+          const rid = path.split("/")[3];
+          this.sql("UPDATE reports SET resolved = 1 WHERE id = ?", rid);
+          return j({ ok: true });
+        }
         return jerr("Not found", 404);
+      }
+
+      // Report user (any admin, not notified to target)
+      if (path === "/report" && method === "POST") {
+        if (!me?.isAdmin) return jerr("Admin only", 403);
+        const targetId = body.userId;
+        const reason = String(body.reason || "").trim().slice(0, 1000);
+        if (!targetId || !reason) return jerr("User and reason required");
+        if (targetId === me.id) return jerr("Cannot report yourself");
+        const target = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", targetId).toArray()[0]);
+        if (!target) return jerr("User not found");
+        if (target.username === "admin") return jerr("Cannot report primary admin");
+        this.sql(
+          "INSERT INTO reports (id, reporter_id, reported_id, reason) VALUES (?, ?, ?, ?)",
+          crypto.randomUUID(), me.id, targetId, reason
+        );
+        return j({ ok: true });
       }
 
       return jerr("Not found", 404);
