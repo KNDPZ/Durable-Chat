@@ -23,6 +23,32 @@ export default {
       u.pathname = path.slice("/api".length) || "/";
       const hubReq = new Request(u.toString(), request);
 
+
+      const pinMatch = path.match(/^\/api\/rooms\/([^/]+)\/pin$/);
+      if (pinMatch) {
+        const roomId = pinMatch[1];
+        const metaUrl = new URL(request.url);
+        metaUrl.pathname = "/rooms/" + roomId + "/meta";
+        const metaRes = await hub.fetch(new Request(metaUrl.toString(), {
+          headers: { Authorization: request.headers.get("Authorization") || "" },
+        }));
+        const meta = await metaRes.json();
+        if (!metaRes.ok) return cors(json(meta, metaRes.status));
+        if (!meta.user) return cors(json({ error: "Login required" }, 401));
+        const isCreator = meta.room.createdBy === meta.user.id;
+        if (!isCreator && !meta.user.isAdmin) return cors(json({ error: "Only creator can pin" }, 403));
+        const roomStub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
+        if (request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          const r = await roomStub.fetch(new Request(new URL("/pin", request.url).toString(), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messageId: body.messageId || null }),
+          }));
+          return cors(await r.json().then((d) => json(d, r.status)));
+        }
+      }
+
       // Message routes: /api/rooms/:id/messages[/:msgId[/(react|history)]]
       const msgMatch = path.match(/^\/api\/rooms\/([^/]+)\/messages(?:\/([^/]+))?(?:\/(react|history))?$/);
       if (msgMatch) {
@@ -52,7 +78,9 @@ export default {
           const listUrl = new URL(request.url);
           listUrl.pathname = "/messages";
           const listRes = await roomStub.fetch(new Request(listUrl.toString()));
-          let messages = await listRes.json();
+          let payload = await listRes.json();
+          let messages = Array.isArray(payload) ? payload : (payload.messages || []);
+          const pinned = Array.isArray(payload) ? null : (payload.pinned || null);
           if (meta.room.visibility === "registered" && !meta.user) {
             messages = messages.map((m) => ({
               ...m,
@@ -62,7 +90,14 @@ export default {
               replyTo: null,
             }));
           }
-          return cors(json({ room: meta.room, messages, members: meta.members || [] }));
+          // Activity ranking: top posters among recent messages
+          const counts = {};
+          for (const m of messages) {
+            if (m.isDeleted) continue;
+            counts[m.username] = (counts[m.username] || 0) + 1;
+          }
+          const activeUsers = Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([u])=>u);
+          return cors(json({ room: meta.room, messages, members: meta.members || [], pinned, activeUsers }));
         }
 
         // GET history
@@ -150,6 +185,20 @@ export default {
             method: "DELETE",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ userId: meta.user.id, isAdmin: !!meta.user.isAdmin }),
+          }));
+          return cors(await r.json().then((d) => json(d, r.status)));
+        }
+
+        
+        // Pin
+        if (method === "POST" && path.endsWith("/pin")) {
+          const isCreator = meta.room.createdBy === meta.user.id;
+          if (!isCreator && !meta.user.isAdmin) return cors(json({ error: "Only creator can pin" }, 403));
+          const body = await request.json().catch(() => ({}));
+          const r = await roomStub.fetch(new Request(new URL("/pin", request.url).toString(), {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ messageId: body.messageId || null }),
           }));
           return cors(await r.json().then((d) => json(d, r.status)));
         }

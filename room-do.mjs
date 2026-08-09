@@ -130,7 +130,8 @@ export class ChatRoom {
     if (action === "messages" && method === "GET" && parts.length === 1) {
       const limit = Math.min(300, Number(url.searchParams.get("limit")) || 150);
       const rows = this.sql("SELECT * FROM messages ORDER BY created_at DESC LIMIT ?", limit).toArray().reverse();
-      return json(rows.map((r) => this.shapeMessage(r)));
+      const pinned = (await this.state.storage.get("pinned")) || null;
+      return json({ messages: rows.map((r) => this.shapeMessage(r)), pinned });
     }
 
     if (action === "messages" && method === "POST" && parts.length === 1) {
@@ -234,6 +235,28 @@ export class ChatRoom {
         ).toArray();
         return json(rows.map((r) => ({ text: r.previous_text, editedAt: r.edited_at })));
       }
+    }
+
+    // Pin / unpin (creator or admin via body)
+    if (action === "pin" && method === "POST") {
+      const msgId = body.messageId || null;
+      if (msgId) {
+        const row = this.sql("SELECT id, text, is_deleted, username FROM messages WHERE id = ?", msgId).toArray()[0];
+        if (!row || row.is_deleted) return json({ error: "Message not found" }, 404);
+        await this.state.storage.put("pinned", {
+          id: row.id,
+          text: String(row.text || "").slice(0, 200),
+          username: row.username,
+        });
+      } else {
+        await this.state.storage.delete("pinned");
+      }
+      const pinned = (await this.state.storage.get("pinned")) || null;
+      this.broadcast({ t: "pin", pinned });
+      return json({ pinned });
+    }
+    if (action === "pin" && method === "GET") {
+      return json({ pinned: (await this.state.storage.get("pinned")) || null });
     }
 
     return json({ error: "unknown" }, 404);

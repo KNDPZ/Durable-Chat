@@ -7,168 +7,228 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-:root,[data-theme=dark]{--bg:#0c0e14;--surface:#14171f;--surface2:#1c2030;--border:#2a3042;--text:#e8eaf2;--muted:#8b93a7;--accent:#6366f1;--accent-h:#818cf8;--success:#22c55e;--danger:#ef4444}
-[data-theme=light]{--bg:#f4f5f9;--surface:#fff;--surface2:#f0f1f6;--border:#dde1ec;--text:#1a1d27;--muted:#6b7280;--accent:#4f46e5}
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-button,input,select{font-family:inherit;font-size:.95rem}button{cursor:pointer;border:none;border-radius:8px;font-weight:500}
-.btn{background:var(--accent);color:#fff;padding:10px 18px}.btn:hover{filter:brightness(1.08)}.btn:disabled{opacity:.5}
+:root,[data-theme=dark]{
+  --bg:#0e1621;--sidebar:#17212b;--surface:#182533;--surface2:#242f3d;
+  --border:#0e1621;--text:#f5f5f5;--muted:#708499;--accent:#2b5278;
+  --accent-hi:#5288c1;--bubble:#182533;--bubble-mine:#2b5278;
+  --danger:#e53935;--success:#4caf50;--pin-bg:#1e2c3a;
+}
+[data-theme=light]{
+  --bg:#fff;--sidebar:#f0f2f5;--surface:#fff;--surface2:#e8e8e8;
+  --border:#dfe3e8;--text:#222;--muted:#707579;--accent:#3390ec;
+  --accent-hi:#2481cc;--bubble:#fff;--bubble-mine:#effdde;
+  --danger:#e53935;--success:#4caf50;--pin-bg:#f0f4f8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+button,input,select,textarea{font-family:inherit;font-size:.95rem}
+button{cursor:pointer;border:none;border-radius:8px;font-weight:500;background:transparent;color:var(--text)}
+input,textarea,select{background:var(--surface2);border:1px solid transparent;border-radius:8px;padding:10px 14px;color:var(--text);width:100%;outline:none}
+input:focus,textarea:focus{border-color:var(--accent-hi)}
+.btn{background:var(--accent-hi);color:#fff;padding:10px 18px}.btn:hover{filter:brightness(1.08)}.btn:disabled{opacity:.5}
 .btn-ghost{background:transparent;color:var(--muted);padding:8px 12px}.btn-ghost:hover{background:var(--surface2);color:var(--text)}
 .btn-danger{background:var(--danger);color:#fff;padding:8px 14px}.btn-sm{padding:6px 12px;font-size:.82rem}
-input,select{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);width:100%;outline:none}
-.topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:50}
-.logo{font-weight:700;font-size:1.15rem}.logo span{color:var(--accent)}
-.topbar-right{display:flex;gap:8px;align-items:center;position:relative}
-.gear-btn{width:40px;height:40px;border-radius:10px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);display:flex;align-items:center;justify-content:center}
-.dropdown{position:absolute;top:48px;right:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;min-width:200px;display:none;overflow:hidden;z-index:100;box-shadow:0 12px 40px rgba(0,0,0,.35)}
-.dropdown.open{display:block}.dropdown-item{display:block;width:100%;text-align:left;padding:12px 16px;background:none;border:none;color:var(--text);font-size:.9rem}
-.dropdown-item:hover{background:var(--surface2)}.dropdown-divider{height:1px;background:var(--border);margin:4px 0}
-.main{max-width:960px;margin:0 auto;padding:24px 16px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px}
-.section-title{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:12px;font-weight:600}
-.item{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer}
-.item:last-child{border-bottom:none}.item:hover{background:var(--surface2)}
-.badge{font-size:.7rem;padding:3px 8px;border-radius:999px;font-weight:500}
-.badge-public{background:rgba(34,197,94,.15);color:#4ade80}.badge-registered{background:rgba(99,102,241,.15);color:#a5b4fc}
-.badge-private{background:rgba(239,68,68,.12);color:#f87171}.badge-friend{background:rgba(234,179,8,.15);color:#fbbf24}
-.badge-admin{background:rgba(168,85,247,.15);color:#c084fc}
-.online-dot{width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;margin-right:6px;box-shadow:0 0 6px var(--success)}
-.tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap}.tab{padding:8px 14px;border-radius:8px;background:transparent;color:var(--muted)}.tab.active{background:var(--surface2);color:var(--text)}
-.sub-tabs{display:flex;gap:4px;margin-bottom:12px}.sub-tab{padding:6px 12px;border-radius:6px;background:transparent;color:var(--muted);font-size:.85rem}.sub-tab.active{background:var(--surface2);color:var(--text)}
-.empty{text-align:center;padding:40px 20px;color:var(--muted)}.error-banner{background:rgba(239,68,68,.12);color:#fca5a5;padding:10px 14px;border-radius:8px;margin-bottom:16px;display:none}
-.chat-header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.messages{height:400px;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:80%;padding:10px 14px;border-radius:12px;background:var(--surface2);font-size:.92rem}.msg.mine{align-self:flex-end;background:rgba(99,102,241,.2)}
-.msg .meta{font-size:.75rem;color:var(--muted);margin-bottom:4px}
-.chat-input{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--border)}.chat-input input{flex:1}
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:200;padding:16px}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto}
-.modal.wide{max-width:680px}.modal h2{margin-bottom:8px}.modal p{color:var(--muted);font-size:.9rem;margin-bottom:16px}
-.modal label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:6px}.field{margin-bottom:16px}
-.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
-.secret-box{background:var(--surface2);border:1px dashed var(--border);border-radius:8px;padding:12px;font-family:monospace;font-size:.85rem;word-break:break-all;margin:12px 0}
-#qrcode,#recoverQr{display:flex;justify-content:center;margin:16px 0}
-.degree-option{display:block;padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer}
-.degree-option.selected,.degree-option:hover{border-color:var(--accent);background:rgba(99,102,241,.08)}
-.degree-option input{width:auto;margin-right:8px}.degree-desc{font-size:.8rem;color:var(--muted);margin:4px 0 0 24px}
-.member-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface2);padding:4px 10px;border-radius:999px;font-size:.8rem;margin:2px}
-.user-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);padding:4px 10px;border-radius:999px;font-size:.85rem}
-.contact-actions{display:flex;gap:6px}.blurred{filter:blur(4px);user-select:none}
-.history-msg{padding:10px 0;border-bottom:1px solid var(--border);font-size:.88rem}.history-meta{font-size:.75rem;color:var(--muted)}
 
-.msg-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;opacity:.7}
-.msg-actions button{background:transparent;color:var(--muted);padding:2px 6px;font-size:.75rem;border-radius:6px}
-.msg-actions button:hover{background:var(--surface);color:var(--text)}
+/* Layout */
+.app{display:flex;height:100vh;width:100vw}
+.sidebar{width:360px;min-width:280px;max-width:420px;background:var(--sidebar);display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.25);position:relative}
+.sidebar-top{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface)}
+.hamburger{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.3rem}
+.hamburger:hover{background:var(--surface2)}
+.search-wrap{flex:1}
+.search-wrap input{border-radius:20px;padding:8px 14px;background:var(--bg);font-size:.9rem}
+.chat-list{flex:1;overflow-y:auto}
+.chat-item{display:flex;gap:12px;padding:10px 14px;cursor:pointer;align-items:center;border-bottom:1px solid rgba(0,0,0,.12)}
+.chat-item:hover,.chat-item.active{background:var(--surface2)}
+.chat-avatar{width:48px;height:48px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;flex-shrink:0;color:#fff}
+.chat-avatar.public{background:#3d6b4f}.chat-avatar.registered{background:#5c4d7a}.chat-avatar.private{background:#6b3d3d}.chat-avatar.dm{background:#2b5278}
+.chat-meta{flex:1;min-width:0}
+.chat-title{font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-title.dm{font-style:italic}
+.chat-sub{font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.chat-right{text-align:right;flex-shrink:0}
+.chat-time{font-size:.72rem;color:var(--muted)}
+.badge-vis{font-size:.65rem;padding:2px 6px;border-radius:999px;margin-top:4px;display:inline-block}
+.badge-public{background:rgba(76,175,80,.2);color:#81c784}
+.badge-registered{background:rgba(156,124,255,.2);color:#b39ddb}
+.badge-private{background:rgba(229,57,53,.15);color:#ef9a9a}
+
+/* Drawer menu */
+.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:none}
+.drawer-backdrop.open{display:block}
+.drawer{position:fixed;top:0;left:0;bottom:0;width:280px;background:var(--sidebar);z-index:100;transform:translateX(-100%);transition:transform .2s;display:flex;flex-direction:column}
+.drawer.open{transform:translateX(0)}
+.drawer-header{padding:24px 20px;background:var(--accent)}
+.drawer-header .name{font-weight:700;font-size:1.1rem}
+.drawer-header .sub{font-size:.8rem;opacity:.85;margin-top:4px}
+.drawer-item{display:flex;align-items:center;gap:16px;padding:14px 20px;color:var(--text);font-size:.95rem;width:100%;text-align:left}
+.drawer-item:hover{background:var(--surface2)}
+.drawer-item .ico{width:24px;text-align:center;opacity:.8}
+.drawer-divider{height:1px;background:var(--surface2);margin:6px 0}
+
+/* Main pane */
+.main{flex:1;display:flex;flex-direction:column;background:var(--bg);min-width:0}
+.main-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.main-empty span{background:var(--surface2);padding:8px 16px;border-radius:20px;font-size:.9rem}
+.chat-header{padding:10px 16px;background:var(--surface);display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(0,0,0,.2);min-height:60px}
+.chat-header-info{flex:1;min-width:0}
+.chat-header-title{font-weight:600;font-size:1rem}
+.chat-header-title.dm{font-style:italic}
+.chat-header-sub{font-size:.78rem;color:var(--muted);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-header-actions{display:flex;gap:6px}
+.pin-bar{background:var(--pin-bg);padding:8px 16px;border-bottom:1px solid rgba(0,0,0,.15);cursor:pointer;display:none;align-items:flex-start;gap:10px}
+.pin-bar.open{display:flex}
+.pin-bar .pin-ico{color:var(--accent-hi);font-size:1rem}
+.pin-bar .pin-body{flex:1;min-width:0}
+.pin-bar .pin-label{font-size:.72rem;color:var(--accent-hi);font-weight:600;text-transform:uppercase}
+.pin-bar .pin-text{font-size:.85rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:6px}
+.msg{max-width:70%;padding:8px 12px;border-radius:12px;background:var(--bubble);font-size:.92rem;position:relative;align-self:flex-start;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.msg.mine{align-self:flex-end;background:var(--bubble-mine)}
 .msg.deleted{opacity:.6;font-style:italic;color:var(--muted)}
-.msg .edited-label{font-size:.7rem;font-style:italic;color:var(--muted);cursor:pointer;margin-top:4px}
+.msg .meta{font-size:.75rem;color:var(--accent-hi);margin-bottom:2px;font-weight:600}
+.msg.mine .meta{color:rgba(255,255,255,.7)}
+.msg .msg-time{font-size:.68rem;color:var(--muted);text-align:right;margin-top:4px}
+.msg .edited-label{font-size:.7rem;font-style:italic;color:var(--muted);cursor:pointer}
 .msg .edited-label:hover{text-decoration:underline}
-.msg .reply-preview{border-left:3px solid var(--accent);padding:4px 8px;margin-bottom:6px;font-size:.8rem;color:var(--muted);cursor:pointer;background:rgba(99,102,241,.08);border-radius:0 6px 6px 0}
+.msg .reply-preview{border-left:3px solid var(--accent-hi);padding:4px 8px;margin-bottom:4px;font-size:.8rem;color:var(--muted);cursor:pointer;background:rgba(0,0,0,.12);border-radius:0 6px 6px 0}
 .msg .forward-badge{font-size:.72rem;color:var(--muted);margin-bottom:4px}
-.msg .reactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
-.msg .reaction-chip{background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:.8rem;cursor:pointer;position:relative}
-.msg .reaction-chip.mine{border-color:var(--accent);background:rgba(99,102,241,.15)}
-.msg .reaction-chip .tip{display:none;position:absolute;bottom:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.75rem;white-space:nowrap;z-index:5;margin-bottom:4px}
+.msg .reactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.msg .reaction-chip{background:rgba(0,0,0,.2);border-radius:999px;padding:1px 7px;font-size:.78rem;cursor:pointer;position:relative}
+.msg .reaction-chip.mine{outline:1px solid var(--accent-hi)}
+.msg .reaction-chip .tip{display:none;position:absolute;bottom:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.72rem;white-space:nowrap;z-index:5;margin-bottom:4px;color:var(--text)}
 .msg .reaction-chip:hover .tip{display:block}
+.msg-actions{display:none;gap:4px;flex-wrap:wrap;margin-top:4px}
+.msg:hover .msg-actions{display:flex}
+.msg-actions button{background:transparent;color:var(--muted);padding:2px 6px;font-size:.72rem;border-radius:6px}
+.msg-actions button:hover{background:rgba(0,0,0,.15);color:var(--text)}
 .msg.highlight{animation:pulseHighlight 1.6s ease}
-@keyframes pulseHighlight{0%{box-shadow:0 0 0 0 rgba(99,102,241,.7)}50%{box-shadow:0 0 0 8px rgba(99,102,241,.2)}100%{box-shadow:0 0 0 0 transparent}}
-.reply-bar{display:none;padding:8px 16px;background:var(--surface2);border-top:1px solid var(--border);font-size:.85rem;align-items:center;gap:10px}
-.reply-bar.open{display:flex}
-.report-row{border-left:3px solid var(--danger)}
-.emoji-picker{display:flex;gap:4px;flex-wrap:wrap;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
-.emoji-picker button{font-size:1.1rem;padding:4px 6px;background:transparent}
+@keyframes pulseHighlight{0%{box-shadow:0 0 0 0 rgba(82,136,193,.7)}50%{box-shadow:0 0 0 8px rgba(82,136,193,.2)}100%{box-shadow:0 0 0 0 transparent}}
+.emoji-picker{display:flex;gap:4px;flex-wrap:wrap;padding:4px;margin-top:4px}
 
+.composer{padding:8px 12px;background:var(--surface);display:flex;flex-direction:column;gap:0}
+.reply-bar{display:none;padding:8px 12px;background:var(--surface2);border-radius:8px 8px 0 0;font-size:.85rem;align-items:center;gap:10px;margin-bottom:0}
+.reply-bar.open{display:flex}
+.composer-row{display:flex;gap:8px;align-items:center;padding:4px 0}
+.composer-row input{border-radius:20px;background:var(--bg);flex:1}
+
+/* Modals */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:200;padding:16px}
+.modal-backdrop.open{display:flex}
+.modal{background:var(--surface);border-radius:12px;padding:24px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto}
+.modal.wide{max-width:640px}
+.modal h2{margin-bottom:8px;font-size:1.15rem}
+.modal p{color:var(--muted);font-size:.9rem;margin-bottom:14px}
+.modal label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px}
+.field{margin-bottom:14px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
+.secret-box{background:var(--surface2);border-radius:8px;padding:12px;font-family:monospace;font-size:.85rem;word-break:break-all;margin:12px 0}
+#qrcode,#recoverQr{display:flex;justify-content:center;margin:12px 0}
+.degree-option{display:block;padding:10px;border:1px solid var(--surface2);border-radius:8px;margin-bottom:6px;cursor:pointer}
+.degree-option.selected,.degree-option:hover{border-color:var(--accent-hi);background:rgba(82,136,193,.1)}
+.degree-option input{width:auto;margin-right:8px}
+.degree-desc{font-size:.78rem;color:var(--muted);margin:4px 0 0 22px}
+.item{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--surface2);cursor:pointer}
+.item:hover{background:var(--surface2)}
+.empty{text-align:center;padding:32px;color:var(--muted);font-size:.9rem}
+.error-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#c62828;color:#fff;padding:10px 18px;border-radius:8px;z-index:300;display:none;font-size:.9rem;max-width:90%}
+.online-dot{width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;margin-right:4px;box-shadow:0 0 4px var(--success)}
+.badge-admin{background:rgba(156,124,255,.25);color:#ce93d8;font-size:.7rem;padding:2px 6px;border-radius:999px}
+.badge-friend{background:rgba(255,193,7,.2);color:#ffc107;font-size:.7rem;padding:2px 6px;border-radius:999px}
+.member-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface2);padding:3px 8px;border-radius:999px;font-size:.78rem;margin:2px}
+.tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
+.tab{padding:8px 14px;border-radius:8px;color:var(--muted)}.tab.active{background:var(--surface2);color:var(--text)}
+.sub-tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+.sub-tab{padding:6px 12px;border-radius:6px;color:var(--muted);font-size:.85rem}.sub-tab.active{background:var(--surface2);color:var(--text)}
+.history-msg{padding:8px 0;border-bottom:1px solid var(--surface2);font-size:.88rem}
+.history-meta{font-size:.72rem;color:var(--muted)}
+.report-row{border-left:3px solid var(--danger)}
+
+@media(max-width:720px){
+  .sidebar{width:100%;max-width:none}
+  .sidebar.hidden-mobile{display:none}
+  .main{display:none}
+  .main.open-mobile{display:flex}
+}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="logo">Durable<span>Chat</span></div>
-  <div class="topbar-right">
-    <span id="userChip" class="user-chip" style="display:none"></span>
-    <button class="gear-btn" id="gearBtn">⚙</button>
-    <div class="dropdown" id="dropdown">
-      <button class="dropdown-item" id="themeToggle"><span id="themeIcon">🌙</span> <span id="themeLabel">Light mode</span></button>
-      <div class="dropdown-divider"></div>
-      <button class="dropdown-item" id="authBtn">Log in / Register</button>
-      <button class="dropdown-item" id="logoutBtn" style="display:none;color:var(--danger)">Log out</button>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <button class="hamburger" id="menuBtn" title="Menu">☰</button>
+      <div class="search-wrap"><input id="sidebarSearch" placeholder="Search" autocomplete="off"/></div>
     </div>
-  </div>
-</div>
-<div class="main">
-  <div class="error-banner" id="errorBanner"></div>
-  <div id="view-home">
-    <div class="tabs">
-      <button class="tab active" data-tab="rooms">Rooms</button>
-      <button class="tab" data-tab="contacts">Contacts</button>
-      <button class="tab" data-tab="search">Search</button>
-      <button class="tab" data-tab="admin" id="adminTab" style="display:none">Admin</button>
-    </div>
-    <div id="panel-rooms">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div class="section-title" style="margin:0">Public rooms</div>
-        <button class="btn btn-sm" id="createRoomBtn" style="display:none">+ Create room</button>
-      </div>
-      <div class="card" id="publicRooms"><div class="empty">Loading…</div></div>
-      <div id="privateSection" style="display:none;margin-top:24px">
-        <div class="section-title">Your private rooms</div>
-        <div class="card" id="privateRooms"></div>
-      </div>
-    </div>
-    <div id="panel-contacts" style="display:none">
-      <div class="section-title">Contacts & friends</div>
-      <div class="card" id="contactsList"><div class="empty">Login to see contacts</div></div>
-    </div>
-    <div id="panel-search" style="display:none">
-      <div class="field" style="margin-bottom:16px"><input id="searchInput" placeholder="Search users…"/></div>
-      <div class="card" id="searchResults"><div class="empty">Type to search</div></div>
-    </div>
-    <div id="panel-admin" style="display:none">
-      <div class="sub-tabs">
-        <button class="sub-tab active" data-admin="online">Online</button>
-        <button class="sub-tab" data-admin="users">All users</button>
-        <button class="sub-tab" data-admin="admins">Admins</button>
-        <button class="sub-tab" data-admin="lookup">Lookup</button>
-        <button class="sub-tab" data-admin="reports">Reports</button>
-      </div>
-      <div id="admin-online" class="card"><div class="empty">Loading…</div></div>
-      <div id="admin-users" class="card" style="display:none"></div>
-      <div id="admin-admins" class="card" style="display:none"></div>
-      <div id="admin-lookup" style="display:none">
-        <div class="field" style="margin-bottom:16px"><input id="adminSearchInput" placeholder="Search username…"/></div>
-        <div class="card" id="adminSearchResults"><div class="empty">Type to search</div></div>
-      </div>
-      <div id="admin-reports" class="card" style="display:none"><div class="empty">Loading…</div></div>
-    </div>
-  </div>
-  <div id="view-room" style="display:none">
-    <div class="card">
+    <div class="chat-list" id="chatList"><div class="empty">Loading…</div></div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main" id="mainPane">
+    <div class="main-empty" id="emptyState"><span>Select a chat to start messaging</span></div>
+    <div id="chatView" style="display:none;flex-direction:column;height:100%">
       <div class="chat-header">
-        <button class="btn-ghost" id="backBtn">← Back</button>
-        <div><strong id="roomName"></strong> <span id="roomBadge" class="badge"></span></div>
-        <div style="margin-left:auto;display:flex;gap:8px">
-          <button class="btn-ghost btn-sm" id="manageMembersBtn" style="display:none">Members</button>
-          <button class="btn-danger btn-sm" id="deleteRoomBtn" style="display:none">Delete</button>
+        <button class="btn-ghost" id="backMobile" style="display:none">←</button>
+        <div class="chat-header-info">
+          <div class="chat-header-title" id="headerTitle"></div>
+          <div class="chat-header-sub" id="headerSub"></div>
+        </div>
+        <div class="chat-header-actions">
+          <button class="btn-ghost btn-sm" id="headerMembersBtn" style="display:none" title="Members">👥</button>
+          <button class="btn-ghost btn-sm" id="headerManageBtn" style="display:none" title="Manage">⚙</button>
+          <button class="btn-ghost btn-sm" id="headerDeleteBtn" style="display:none" title="Delete room">🗑</button>
         </div>
       </div>
-      <div id="membersBar" style="display:none;padding:8px 16px;border-bottom:1px solid var(--border)"></div>
+      <div class="pin-bar" id="pinBar">
+        <div class="pin-ico">📌</div>
+        <div class="pin-body">
+          <div class="pin-label">Pinned message</div>
+          <div class="pin-text" id="pinText"></div>
+        </div>
+      </div>
       <div class="messages" id="messages"></div>
-      <div class="reply-bar" id="replyBar">
-        <div style="flex:1"><strong>Replying to <span id="replyToName"></span></strong>
-          <div id="replyToText" style="color:var(--muted);font-size:.8rem"></div></div>
-        <button class="btn-ghost btn-sm" id="cancelReply">✕</button>
+      <div class="composer" id="composer">
+        <div class="reply-bar" id="replyBar">
+          <div style="flex:1"><strong>Replying to <span id="replyToName"></span></strong>
+            <div id="replyToText" style="color:var(--muted);font-size:.8rem"></div></div>
+          <button class="btn-ghost btn-sm" id="cancelReply">✕</button>
+        </div>
+        <div class="composer-row" id="chatInputRow">
+          <input id="msgInput" placeholder="Write a message…" maxlength="2000" autocomplete="off"/>
+          <button class="btn btn-sm" id="sendBtn">Send</button>
+        </div>
+        <div id="loginToChat" style="display:none;padding:12px;text-align:center;color:var(--muted);font-size:.9rem">Log in to chat</div>
       </div>
-      <div class="chat-input" id="chatInputRow">
-        <input id="msgInput" placeholder="Type a message…" maxlength="2000"/>
-        <button class="btn" id="sendBtn">Send</button>
-      </div>
-      <div id="loginToChat" style="display:none;padding:16px;text-align:center;color:var(--muted)">Log in to chat</div>
     </div>
-  </div>
+  </main>
 </div>
 
-<div class="modal-backdrop" id="authModal" style="display:none"><div class="modal">
+<!-- Drawer -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div class="name" id="drawerName">Guest</div>
+    <div class="sub" id="drawerSub">Not logged in</div>
+  </div>
+  <button class="drawer-item" id="drawerTheme"><span class="ico">🎨</span> <span id="themeLabel">Light mode</span></button>
+  <button class="drawer-item" id="drawerAuth"><span class="ico">🔑</span> Log in / Register</button>
+  <button class="drawer-item" id="drawerContacts" style="display:none"><span class="ico">👥</span> Contacts</button>
+  <button class="drawer-item" id="drawerSearch" style="display:none"><span class="ico">🔍</span> Search users</button>
+  <button class="drawer-item" id="drawerCreate" style="display:none"><span class="ico">➕</span> Create room</button>
+  <button class="drawer-item" id="drawerAdmin" style="display:none"><span class="ico">🛡</span> Admin</button>
+  <div class="drawer-divider"></div>
+  <button class="drawer-item" id="drawerLogout" style="display:none;color:var(--danger)"><span class="ico">🚪</span> Log out</button>
+</aside>
+
+<div class="error-toast" id="errorBanner"></div>
+
+<!-- Auth modal -->
+<div class="modal-backdrop" id="authModal"><div class="modal">
   <h2 id="authTitle">Welcome</h2><p id="authDesc"></p>
   <div id="authStep-choice">
     <button class="btn" style="width:100%;margin-bottom:10px" id="showLogin">Log in</button>
-    <button class="btn-ghost" style="width:100%;border:1px solid var(--border)" id="showRegister">Create account</button>
+    <button class="btn-ghost" style="width:100%;border:1px solid var(--surface2)" id="showRegister">Create account</button>
   </div>
   <div id="authStep-login" style="display:none">
     <div class="field"><label>Username</label><input id="loginUsername"/></div>
@@ -188,13 +248,14 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
   </div>
 </div></div>
 
-<div class="modal-backdrop" id="createRoomModal" style="display:none"><div class="modal">
+<!-- Create room -->
+<div class="modal-backdrop" id="createRoomModal"><div class="modal">
   <h2>Create a room</h2>
   <div class="field"><label>Name</label><input id="newRoomName" maxlength="60"/></div>
   <div class="field"><label>Visibility</label>
     <select id="newRoomVis">
       <option value="public">Public</option>
-      <option value="registered">Registered only (blurred for guests)</option>
+      <option value="registered">Registered only</option>
       <option value="private">Private (invite-only)</option>
     </select>
   </div>
@@ -203,62 +264,100 @@ input,select{background:var(--surface2);border:1px solid var(--border);border-ra
       <label class="degree-option selected"><input type="radio" name="inviteDegree" value="contacts" checked/> Only contacts
         <div class="degree-desc">Only people already in the adder's contact list.</div></label>
       <label class="degree-option"><input type="radio" name="inviteDegree" value="contacts_of_contacts"/> Contacts of contacts
-        <div class="degree-desc">Contacts, or contacts of those contacts (2 degrees).</div></label>
+        <div class="degree-desc">Contacts, or contacts of those contacts.</div></label>
       <label class="degree-option"><input type="radio" name="inviteDegree" value="all"/> Anyone
-        <div class="degree-desc">Any registered user on the platform.</div></label>
+        <div class="degree-desc">Any registered user.</div></label>
     </div>
     <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
       <input type="checkbox" id="allowMembersInvite" style="width:auto"/> Allow members to invite others
     </label></div>
     <div class="field"><label>Add contacts now</label>
-      <div id="createMemberPicker" style="max-height:140px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+      <div id="createMemberPicker" style="max-height:140px;overflow:auto;border:1px solid var(--surface2);border-radius:8px;padding:8px"></div>
     </div>
   </div>
   <div class="modal-actions"><button class="btn-ghost" id="cancelCreateRoom">Cancel</button><button class="btn" id="doCreateRoom">Create</button></div>
 </div></div>
 
-<div class="modal-backdrop" id="membersModal" style="display:none"><div class="modal">
+<!-- Contacts / Search / Admin / Members panels as modals -->
+<div class="modal-backdrop" id="contactsModal"><div class="modal wide">
+  <h2>Contacts</h2>
+  <div id="contactsList"><div class="empty">Loading…</div></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeContacts">Close</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="searchModal"><div class="modal wide">
+  <h2>Search users</h2>
+  <div class="field"><input id="searchInput" placeholder="Search users…"/></div>
+  <div id="searchResults"><div class="empty">Type to search</div></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeSearch">Close</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="adminModal"><div class="modal wide">
+  <h2>Admin</h2>
+  <div class="sub-tabs">
+    <button class="sub-tab active" data-admin="online">Online</button>
+    <button class="sub-tab" data-admin="users">All users</button>
+    <button class="sub-tab" data-admin="admins">Admins</button>
+    <button class="sub-tab" data-admin="lookup">Lookup</button>
+    <button class="sub-tab" data-admin="reports">Reports</button>
+  </div>
+  <div id="admin-online"><div class="empty">Loading…</div></div>
+  <div id="admin-users" style="display:none"></div>
+  <div id="admin-admins" style="display:none"></div>
+  <div id="admin-lookup" style="display:none">
+    <div class="field"><input id="adminSearchInput" placeholder="Search username…"/></div>
+    <div id="adminSearchResults"><div class="empty">Type to search</div></div>
+  </div>
+  <div id="admin-reports" style="display:none"></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeAdmin">Close</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="membersModal"><div class="modal">
   <h2>Members</h2>
   <div id="membersList"></div>
-  <div class="field" style="margin-top:16px"><label>Add from contacts</label>
-    <div id="addMemberPicker" style="max-height:160px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+  <div class="field" style="margin-top:12px" id="addMemberSection">
+    <label>Add from contacts</label>
+    <div id="addMemberPicker" style="max-height:160px;overflow:auto;border:1px solid var(--surface2);border-radius:8px;padding:8px"></div>
   </div>
   <div class="modal-actions"><button class="btn-ghost" id="closeMembers">Close</button></div>
 </div></div>
 
-<div class="modal-backdrop" id="adminUserModal" style="display:none"><div class="modal wide">
+<div class="modal-backdrop" id="adminUserModal"><div class="modal wide">
   <h2 id="adminUserTitle">User</h2><p id="adminUserMeta"></p>
-  <div id="adminUserActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
-  <div class="section-title">Contacts</div><div id="adminContacts" class="card" style="max-height:140px;overflow:auto"></div>
-  <div class="section-title" style="margin-top:12px">Message history</div><div id="adminHistory" class="card" style="max-height:240px;overflow:auto;padding:12px 16px"></div>
+  <div id="adminUserActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+  <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">Contacts</div>
+  <div id="adminContacts" style="max-height:120px;overflow:auto;margin-bottom:12px"></div>
+  <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">Message history</div>
+  <div id="adminHistory" style="max-height:200px;overflow:auto"></div>
   <div class="modal-actions"><button class="btn-ghost" id="closeAdminUser">Close</button></div>
 </div></div>
 
-<div class="modal-backdrop" id="recoverModal" style="display:none"><div class="modal">
+<div class="modal-backdrop" id="reportModal"><div class="modal">
+  <h2>Report user</h2>
+  <p>Reporting <strong id="reportUsername"></strong>. They will not be notified.</p>
+  <div class="field"><label>Reason</label><textarea id="reportReason" rows="4"></textarea></div>
+  <div class="modal-actions"><button class="btn-ghost" id="cancelReport">Cancel</button><button class="btn btn-danger" id="submitReport">Submit report</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="forwardModal"><div class="modal">
+  <h2>Forward message</h2>
+  <p>Choose a contact to DM this message to.</p>
+  <div id="forwardContactList" style="max-height:240px;overflow:auto"></div>
+  <div class="modal-actions"><button class="btn-ghost" id="cancelForward">Cancel</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="editHistoryModal"><div class="modal">
+  <h2>Edit history</h2>
+  <div id="editHistoryList"></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeEditHistory">Close</button></div>
+</div></div>
+
+<div class="modal-backdrop" id="recoverModal"><div class="modal">
   <h2>Account recovery</h2>
   <p>New secret for <strong id="recoverUsername"></strong></p>
   <div id="recoverQr"></div>
   <div class="secret-box" id="recoverSecret"></div>
   <div class="modal-actions"><button class="btn" id="closeRecover">Done</button></div>
-</div></div>
-
-
-<div class="modal-backdrop" id="reportModal" style="display:none"><div class="modal">
-  <h2>Report user</h2>
-  <p>Reporting <strong id="reportUsername"></strong>. They will not be notified.</p>
-  <div class="field"><label>Reason</label><textarea id="reportReason" rows="4" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:inherit"></textarea></div>
-  <div class="modal-actions"><button class="btn-ghost" id="cancelReport">Cancel</button><button class="btn btn-danger" id="submitReport">Submit report</button></div>
-</div></div>
-<div class="modal-backdrop" id="forwardModal" style="display:none"><div class="modal">
-  <h2>Forward message</h2>
-  <p>Choose a contact to DM this message to.</p>
-  <div id="forwardContactList" class="card" style="max-height:240px;overflow:auto"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="cancelForward">Cancel</button></div>
-</div></div>
-<div class="modal-backdrop" id="editHistoryModal" style="display:none"><div class="modal">
-  <h2>Edit history</h2>
-  <div id="editHistoryList"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeEditHistory">Close</button></div>
 </div></div>
 
 <script src="/app.js"></script>
