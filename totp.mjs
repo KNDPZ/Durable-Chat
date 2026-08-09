@@ -84,8 +84,8 @@ export async function generateTOTP(secretBase32, windowOffset = 0) {
 export async function verifyTOTP(secretBase32, token) {
   const clean = String(token).replace(/\s/g, "");
   if (!/^\d{6}$/.test(clean)) return false;
-  // ±1 step window for clock skew
-  for (let i = -1; i <= 1; i++) {
+  // ±2 steps (±60s) — tolerates phone/server clock skew; code is still short-lived
+  for (let i = -2; i <= 2; i++) {
     if ((await generateTOTP(secretBase32, i)) === clean) return true;
   }
   return false;

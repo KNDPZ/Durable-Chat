@@ -101,7 +101,7 @@ $("#doLogin").onclick = async () => {
     });
     token = d.token; me = d.user; localStorage.setItem("dc_token", token);
     $("#authModal").style.display = "none"; updateAuthUI(); loadRooms(); loadContacts(); startHeartbeat();
-  } catch (e) { showError(e.message); }
+  } catch (e) { showError(e.message); btn.disabled = false; }
 };
 $("#checkUsername").onclick = async () => {
   const username = $("#regUsername").value.trim();
@@ -137,6 +137,9 @@ $("#checkUsername").onclick = async () => {
   } catch (e) { showError(e.message); }
 };
 $("#completeReg").onclick = async () => {
+  const btn = $("#completeReg");
+  if (btn.disabled) return;
+  btn.disabled = true;
   try {
     const d = await api("/auth/complete-register", {
       method: "POST",
@@ -145,7 +148,7 @@ $("#completeReg").onclick = async () => {
     if (d.error) throw new Error(d.error);
     token = d.token; me = d.user; localStorage.setItem("dc_token", token);
     $("#authModal").style.display = "none"; updateAuthUI(); loadRooms(); loadContacts(); startHeartbeat();
-  } catch (e) { showError(e.message); }
+  } catch (e) { showError(e.message); btn.disabled = false; }
 };
 
 $$(".tab").forEach((tab) => {

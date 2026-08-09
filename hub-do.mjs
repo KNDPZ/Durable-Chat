@@ -120,11 +120,12 @@ export class Hub {
       }
       if (path === "/auth/complete-register" && method === "POST") {
         const clean = String(body.username || "").trim().toLowerCase();
-        if (!(await verifyTOTP(body.secret, body.code))) return jerr("Invalid verification code");
+        const secretNorm = String(body.secret || "").replace(/[\s=]+/g, "").toUpperCase();
+        if (!(await verifyTOTP(secretNorm, body.code))) return jerr("Invalid verification code");
         if (this.sql("SELECT 1 FROM users WHERE username = ?", clean).toArray()[0]) return jerr("Username already taken");
         const id = crypto.randomUUID();
         const isAdmin = clean === "admin" ? 1 : 0;
-        this.sql("INSERT INTO users (id, username, totp_secret, is_admin, last_seen) VALUES (?, ?, ?, ?, datetime('now'))", id, clean, body.secret, isAdmin);
+        this.sql("INSERT INTO users (id, username, totp_secret, is_admin, last_seen) VALUES (?, ?, ?, ?, datetime('now'))", id, clean, secretNorm, isAdmin);
         const sess = this.createSession(id);
         return j({ user: { id, username: clean, createdAt: new Date().toISOString(), isAdmin: !!isAdmin, online: true }, token: sess });
       }
