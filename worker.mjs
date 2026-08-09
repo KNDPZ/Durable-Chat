@@ -1,3 +1,17 @@
+
+async function purgeRoomMessages(env, roomId) {
+  try {
+    const roomStub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
+    await roomStub.fetch(new Request("https://room/purge", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }));
+  } catch (e) {
+    console.log("purge failed", roomId, e.message);
+  }
+}
+
 // worker.mjs — front door
 export { Hub } from "./hub-do.mjs";
 export { ChatRoom } from "./room-do.mjs";
@@ -281,6 +295,14 @@ export default {
       }
 
       const res = await hub.fetch(hubReq);
+      // If room was emptied or deleted, purge Durable Object message storage
+      try {
+        const clone = res.clone();
+        const data = await clone.json();
+        if (data && data.purged && data.roomId) {
+          await purgeRoomMessages(env, data.roomId);
+        }
+      } catch {}
       return cors(res);
     }
 

@@ -237,6 +237,20 @@ export class ChatRoom {
       }
     }
 
+    // Purge all messages when room is deleted / empty
+    if (action === "purge" && method === "POST") {
+      try { this.sql("DELETE FROM reactions"); } catch {}
+      try { this.sql("DELETE FROM edit_history"); } catch {}
+      try { this.sql("DELETE FROM messages"); } catch {}
+      try { await this.state.storage.delete("pinned"); } catch {}
+      // Clear any other storage keys
+      const keys = await this.state.storage.list();
+      for (const k of keys.keys()) {
+        try { await this.state.storage.delete(k); } catch {}
+      }
+      return json({ ok: true, purged: true });
+    }
+
     // Pin / unpin (creator or admin via body)
     if (action === "pin" && method === "POST") {
       const msgId = body.messageId || null;

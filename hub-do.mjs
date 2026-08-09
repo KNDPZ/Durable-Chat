@@ -954,14 +954,26 @@ export class Hub {
     return this.getRoom(id);
   }
 
+  purgeRoomData(roomId) {
+    this.sql("DELETE FROM room_members WHERE room_id = ?", roomId);
+    this.sql("DELETE FROM room_admins WHERE room_id = ?", roomId);
+    this.sql("DELETE FROM join_requests WHERE room_id = ?", roomId);
+    this.sql("DELETE FROM message_log WHERE room_id = ?", roomId);
+    this.sql("DELETE FROM last_read WHERE room_id = ?", roomId);
+    this.sql("DELETE FROM rooms WHERE id = ?", roomId);
+  }
+
   deleteRoom(roomId, me) {
     const room = this.getRoom(roomId);
     if (!room) return { ok: false, error: "Room not found" };
-    if (room.createdBy !== me.id && !me.isAdmin) return { ok: false, error: "Only creator or admin can delete" };
-    this.sql("DELETE FROM rooms WHERE id = ?", roomId);
-    this.sql("DELETE FROM room_members WHERE room_id = ?", roomId);
-    this.sql("DELETE FROM message_log WHERE room_id = ?", roomId);
-    return { ok: true };
+    const isDm = roomId.startsWith("dm:");
+    // Creator, primary admin, or any DM participant can delete
+    const isMember = this.isMember(roomId, me.id);
+    if (room.createdBy !== me.id && !me.isAdmin && me.username !== "admin" && !(isDm && isMember)) {
+      return { ok: false, error: "Only creator or admin can delete" };
+    }
+    this.purgeRoomData(roomId);
+    return { ok: true, purged: true, roomId };
   }
 
   addMember(roomId, adderId, targetId) {

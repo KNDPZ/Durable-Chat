@@ -550,8 +550,14 @@ async function openRoom(roomId) {
     $("#headerMembersBtn").style.display = isPrivate && me ? "inline-block" : "none";
     const canInvite = isPrivate && me && (data.isCreator || data.isRoomAdmin || data.room.allowMembersInvite);
     $("#headerInviteBtn").style.display = canInvite ? "inline-block" : "none";
-    const canLeave = isPrivate && me && !data.isCreator && currentMembers.some((m) => m.id === me.id);
+    const isDm = currentRoom.id.startsWith("dm:");
+    const canLeave = me && currentMembers.some((m) => m.id === me.id) && (isDm || (isPrivate && !data.isCreator));
     $("#headerLeaveBtn").style.display = canLeave ? "inline-block" : "none";
+    // Creator of non-DM can delete; DM participants can also delete chat
+    const canDelete = me && (data.isCreator || (me.username === "admin") || (isDm && currentMembers.some((m) => m.id === me.id)));
+    $("#headerDeleteBtn").style.display = canDelete && !isDm ? "inline-block" : (isDm && canLeave ? "inline-block" : (canDelete ? "inline-block" : "none"));
+    if (isDm) $("#headerDeleteBtn").title = "Delete chat";
+    else $("#headerDeleteBtn").title = "Delete room";
     api("/rooms/mark-read", { method: "POST", body: JSON.stringify({ roomId }) }).then(() => {
       delete unreadMap[roomId];
       renderChatList($("#sidebarSearch").value);
@@ -621,10 +627,16 @@ function renderPin(pinned) {
 }
 
 $("#headerDeleteBtn").onclick = async () => {
-  if (!currentRoom || !confirm("Delete this room?")) return;
+  if (!currentRoom) return;
+  const isDm = currentRoom.id.startsWith("dm:");
+  if (!confirm(isDm
+    ? "Delete this conversation? All messages will be permanently removed."
+    : "Delete this room? All messages will be permanently removed.")) return;
   try {
     await api("/rooms/" + currentRoom.id, { method: "DELETE" });
-    showEmpty(); loadRooms();
+    showEmpty();
+    loadRooms();
+    showError("Deleted — messages purged");
   } catch (e) { showError(e.message); }
 };
 $("#headerMembersBtn").onclick = () => openMembersModal(false);
@@ -644,7 +656,15 @@ async function openRoomSettings() {
   $("#settingsAllowInvite").checked = !!currentRoom.allowMembersInvite;
   $("#settingsDegree").value = currentRoom.inviteDegree || "contacts";
   const isCreator = currentRoom.isCreator || (me && currentRoom.createdBy === me.id);
+  // Creator has full access to every room setting
   $("#settingsName").disabled = !isCreator && !(me && me.username === "admin");
+  $("#settingsVis").disabled = false;
+  $("#settingsSearchable").disabled = false;
+  $("#settingsAllowInvite").disabled = false;
+  $("#settingsDegree").disabled = false;
+  if (!isCreator && !(me && me.username === "admin") && currentRoom.isRoomAdmin) {
+    // Secondary admin: can change privacy/invite but not name (already disabled)
+  }
   if ($("#settingsAllowAdminAvatar")) {
     $("#settingsAllowAdminAvatar").checked = !!currentRoom.allowAdminAvatar;
     $("#settingsAllowAdminAvatarWrap").style.display = isCreator || (me && me.username === "admin") ? "block" : "none";
@@ -1318,11 +1338,14 @@ $("#submitReport").onclick = async () => {
 // Invite / Leave
 $("#headerInviteBtn").onclick = () => openMembersModal(true);
 $("#headerLeaveBtn").onclick = async () => {
-  if (!currentRoom || !confirm("Leave this room?")) return;
+  if (!currentRoom) return;
+  const isDm = currentRoom.id.startsWith("dm:");
+  if (!confirm(isDm ? "Leave this conversation? If no one remains, messages will be deleted." : "Leave this room?")) return;
   try {
-    await api("/rooms/leave", { method: "POST", body: JSON.stringify({ roomId: currentRoom.id }) });
+    const res = await api("/rooms/leave", { method: "POST", body: JSON.stringify({ roomId: currentRoom.id }) });
     showEmpty();
     loadRooms();
+    if (res.purged) showError("Chat emptied — messages purged");
   } catch (e) { showError(e.message); }
 };
 
