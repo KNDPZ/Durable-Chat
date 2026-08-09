@@ -184,7 +184,16 @@ export default {
             counts[m.username] = (counts[m.username] || 0) + 1;
           }
           const activeUsers = Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([u])=>u);
-          return cors(json({ room: meta.room, messages, members: meta.members || [], pinned, activeUsers }));
+          return cors(json({
+            room: meta.room,
+            messages,
+            members: meta.members || [],
+            pinned,
+            activeUsers,
+            isCreator: !!meta.isCreator,
+            isRoomAdmin: !!meta.isRoomAdmin,
+            user: meta.user || null,
+          }));
         }
 
         // GET history

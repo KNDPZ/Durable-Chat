@@ -563,9 +563,19 @@ async function openRoom(roomId) {
       renderChatList($("#sidebarSearch").value);
     }).catch(() => {});
     if (roomId.startsWith("dm:")) refreshDmSeen(roomId); else dmSeen = false;
-    const canSettings = me && !currentRoom.id.startsWith("dm:") && (data.isCreator || data.isRoomAdmin || (me.username === "admin"));
+    // Creator always gets settings (fallback if API flag missing)
+    const amCreator = !!(data.isCreator || (me && data.room && String(data.room.createdBy) === String(me.id)));
+    currentRoom.isCreator = amCreator;
+    const amRoomAdmin = !!(data.isRoomAdmin || amCreator);
+    currentRoom.isRoomAdmin = amRoomAdmin;
+    const canSettings = me && !currentRoom.id.startsWith("dm:") && (amCreator || amRoomAdmin || (me.username === "admin"));
     $("#headerManageBtn").style.display = canSettings ? "inline-block" : "none";
     $("#headerManageBtn").title = "Room settings";
+    // Creator should not see Leave
+    const canLeave2 = me && currentMembers.some((m) => m.id === me.id) && (isDm || (isPrivate && !amCreator));
+    $("#headerLeaveBtn").style.display = canLeave2 ? "inline-block" : "none";
+    const canDelete2 = me && (amCreator || me.username === "admin" || (isDm && currentMembers.some((m) => m.id === me.id)));
+    $("#headerDeleteBtn").style.display = canDelete2 ? "inline-block" : "none";
     connectWS(roomId);
     // mobile
     if (window.innerWidth <= 720) {

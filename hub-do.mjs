@@ -304,7 +304,7 @@ export class Hub {
         if (room.visibility === "private" && me && me.username === "admin" && !members.find((m) => m.id === me.id)) {
           // allow without membership
         }
-        const isCreator = me ? room.createdBy === me.id : false;
+        const isCreator = me ? String(room.createdBy) === String(me.id) : false;
         const isRoomAdmin = me ? this.isRoomAdmin(room.id, me.id) : false;
         return j({ room, members, user: me, isCreator, isRoomAdmin });
       }
@@ -635,10 +635,21 @@ export class Hub {
         const roomId = body.roomId;
         const room = this.getRoom(roomId);
         if (!room) return jerr("Room not found");
-        if (room.createdBy === me.id) return jerr("Creator cannot leave; delete the room instead");
+        const isDm = String(roomId).startsWith("dm:");
+        // Non-DM: creator must delete the room instead of leave
+        if (!isDm && room.createdBy === me.id) {
+          return jerr("Creator cannot leave; delete the room instead");
+        }
         this.sql("DELETE FROM room_members WHERE room_id = ? AND user_id = ?", roomId, me.id);
         this.sql("DELETE FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, me.id);
-        return j({ ok: true });
+        this.sql("DELETE FROM last_read WHERE room_id = ? AND user_id = ?", roomId, me.id);
+        const remaining = this.sql("SELECT COUNT(*) AS c FROM room_members WHERE room_id = ?", roomId).toArray()[0]?.c || 0;
+        if (remaining === 0) {
+          this.purgeRoomData(roomId);
+          return j({ ok: true, purged: true, roomId });
+        }
+        // Left but room still exists for others — they keep their history
+        return j({ ok: true, purged: false, remaining, roomId });
       }
 
       // Block / unblock / list
@@ -658,7 +669,25 @@ export class Hub {
         // remove contacts both ways
         this.sql("DELETE FROM contacts WHERE (owner_id = ? AND contact_id = ?) OR (owner_id = ? AND contact_id = ?)",
           me.id, targetId, targetId, me.id);
-        return j({ ok: true });
+        // Detach blocker from all DM rooms shared with blocked user (blocker leaves those DMs)
+        const dms = this.sql(
+          `SELECT r.id FROM rooms r
+           JOIN room_members m1 ON m1.room_id = r.id AND m1.user_id = ?
+           JOIN room_members m2 ON m2.room_id = r.id AND m2.user_id = ?
+           WHERE r.id LIKE 'dm:%'`,
+          me.id, targetId
+        ).toArray();
+        const purged = [];
+        for (const d of dms) {
+          this.sql("DELETE FROM room_members WHERE room_id = ? AND user_id = ?", d.id, me.id);
+          this.sql("DELETE FROM last_read WHERE room_id = ? AND user_id = ?", d.id, me.id);
+          const remaining = this.sql("SELECT COUNT(*) AS c FROM room_members WHERE room_id = ?", d.id).toArray()[0]?.c || 0;
+          if (remaining === 0) {
+            this.purgeRoomData(d.id);
+            purged.push(d.id);
+          }
+        }
+        return j({ ok: true, purgedDms: purged });
       }
       if (path === "/blocks/remove" && method === "POST") {
         if (!me) return jerr("Login required", 401);
@@ -859,7 +888,7 @@ export class Hub {
   isRoomAdmin(roomId, userId) {
     const room = this.getRoom(roomId);
     if (!room) return false;
-    if (room.createdBy === userId) return true;
+    if (String(room.createdBy) === String(userId)) return true;
     return !!this.sql("SELECT 1 FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, userId).toArray()[0];
   }
 
