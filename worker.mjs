@@ -17,6 +17,42 @@ export default {
       return env.ROOMS.get(env.ROOMS.idFromName(roomId)).fetch(request);
     }
 
+    // Serve avatar from R2
+    if (path.startsWith("/avatar/")) {
+      const userId = path.slice("/avatar/".length).split("/")[0];
+      if (!userId || !env.AVATARS) return new Response("Not found", { status: 404 });
+      const obj = await env.AVATARS.get("avatars/" + userId);
+      if (!obj) return new Response("Not found", { status: 404 });
+      const headers = new Headers();
+      obj.writeHttpMetadata(headers);
+      headers.set("cache-control", "public, max-age=3600");
+      return new Response(obj.body, { headers });
+    }
+
+    // Upload avatar (multipart or raw body)
+    if (path === "/api/profile/avatar-upload" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") || "";
+      const hub = env.HUB.get(env.HUB.idFromName("global"));
+      const meRes = await hub.fetch(new Request(new URL("/auth/me", request.url).toString(), {
+        headers: { Authorization: auth },
+      }));
+      const meData = await meRes.json();
+      if (!meData.user) return cors(json({ error: "Login required" }, 401));
+      if (!env.AVATARS) return cors(json({ error: "R2 not configured" }, 503));
+      const ct = request.headers.get("content-type") || "image/jpeg";
+      if (!ct.startsWith("image/")) return cors(json({ error: "Image required" }, 400));
+      const buf = await request.arrayBuffer();
+      if (buf.byteLength > 2 * 1024 * 1024) return cors(json({ error: "Max 2MB" }, 400));
+      const key = "avatars/" + meData.user.id;
+      await env.AVATARS.put(key, buf, { httpMetadata: { contentType: ct } });
+      await hub.fetch(new Request(new URL("/profile/avatar", request.url).toString(), {
+        method: "POST",
+        headers: { Authorization: auth, "content-type": "application/json" },
+        body: JSON.stringify({ key }),
+      }));
+      return cors(json({ ok: true, avatarUrl: "/avatar/" + meData.user.id + "?t=" + Date.now() }));
+    }
+
     if (path.startsWith("/api/")) {
       const hub = env.HUB.get(env.HUB.idFromName("global"));
       const u = new URL(request.url);

@@ -50,6 +50,11 @@ function updateAuthUI() {
   if (me) {
     $("#drawerName").textContent = "@" + me.username;
     $("#drawerSub").textContent = me.isAdmin ? (me.isPrimaryAdmin || me.username === "admin" ? "Primary admin" : "Admin") : "Logged in";
+    const av = $("#drawerAvatar");
+    if (av) {
+      if (me.avatarUrl) { av.style.backgroundImage = "url(" + me.avatarUrl + "?t=" + Date.now() + ")"; av.textContent = ""; }
+      else { av.style.backgroundImage = ""; av.textContent = me.username.charAt(0).toUpperCase(); }
+    }
     $("#drawerAuth").style.display = "none";
     $("#drawerLogout").style.display = "flex";
     $("#drawerContacts").style.display = "flex";
@@ -59,6 +64,8 @@ function updateAuthUI() {
   } else {
     $("#drawerName").textContent = "Guest";
     $("#drawerSub").textContent = "Not logged in";
+    const av = $("#drawerAvatar");
+    if (av) { av.style.backgroundImage = ""; av.textContent = "?"; }
     $("#drawerAuth").style.display = "flex";
     $("#drawerLogout").style.display = "none";
     $("#drawerContacts").style.display = "none";
@@ -72,7 +79,8 @@ $("#drawerAuth").onclick = () => { closeDrawer(); showAuthStep("choice"); openMo
 $("#drawerLogout").onclick = async () => {
   try { await api("/auth/logout", { method: "POST" }); } catch {}
   token = null; me = null; localStorage.removeItem("dc_token");
-  updateAuthUI(); closeDrawer(); loadRooms(); showEmpty();
+  updateAuthUI(); closeDrawer();
+  location.href = "/";
 };
 $("#drawerContacts").onclick = () => { closeDrawer(); openModal("contactsModal"); loadContacts(); };
 $("#drawerCreate").onclick = () => { closeDrawer(); openCreateRoom(); };
@@ -228,20 +236,42 @@ async function doGlobalSearch(q) {
       const box = $("#chatList");
       if (!users.length) { box.innerHTML = '<div class="empty">No users</div>'; return; }
       box.innerHTML = '<div style="padding:8px 14px;font-size:.72rem;color:var(--muted);text-transform:uppercase">Users</div>' +
-        users.map((u) =>
-          `<div class="chat-item" data-user="${u.id}">
+        users.map((u) => {
+          if (me && u.id === me.id) {
+            return `<div class="chat-item" data-self="1">
+              <div class="chat-avatar dm">${u.avatarUrl ? "" : esc(u.username.charAt(0).toUpperCase())}</div>
+              <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
+              <div class="chat-sub">That's you — tap for profile</div></div></div>`;
+          }
+          const btns = me ? `<div class="chat-right" style="display:flex;gap:4px;flex-direction:column">
+            ${!u.isContact ? `<button class="btn btn-sm add-from-search" data-id="${u.id}">Add contact</button>` : ""}
+            <button class="btn-ghost btn-sm block-from-search" data-id="${u.id}">Block</button>
+          </div>` : "";
+          return `<div class="chat-item" data-user="${u.id}">
             <div class="chat-avatar dm">${esc(u.username.charAt(0).toUpperCase())}</div>
             <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
             <div class="chat-sub">${u.isContact ? "In contacts" : "Not in contacts"}</div></div>
-            <div class="chat-right">${!u.isContact && me ? `<button class="btn btn-sm add-from-search" data-id="${u.id}">Add contact</button>` : ""}</div>
-          </div>`
-        ).join("");
+            ${btns}
+          </div>`;
+        }).join("");
+      box.querySelectorAll("[data-self]").forEach((el) => { el.onclick = () => openProfile(); });
       box.querySelectorAll(".add-from-search").forEach((btn) => {
         btn.onclick = async (e) => {
           e.stopPropagation();
           try {
             await api("/contacts", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
             btn.textContent = "Added"; btn.disabled = true;
+          } catch (err) { showError(err.message); }
+        };
+      });
+      box.querySelectorAll(".block-from-search").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("Are you sure you want to block this user?")) return;
+          try {
+            await api("/blocks", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
+            btn.textContent = "Blocked"; btn.disabled = true;
+            showError("User blocked");
           } catch (err) { showError(err.message); }
         };
       });
@@ -1192,7 +1222,7 @@ $("#bellBtn").onclick = async () => {
       box.querySelectorAll(".notif-block").forEach((btn) => {
         btn.onclick = async (e) => {
           e.stopPropagation();
-          if (!confirm("Block this user? They will not be notified.")) return;
+          if (!confirm("Are you sure you want to block this user?")) return;
           try {
             await api("/blocks", { method: "POST", body: JSON.stringify({ userId: btn.dataset.uid }) });
             btn.textContent = "Blocked"; btn.disabled = true;
@@ -1253,6 +1283,80 @@ async function refreshDmSeen(roomId) {
 setInterval(() => { if (me) refreshBell(); }, 30000);
 
 
+
+function openProfile() {
+  if (!me) return;
+  closeDrawer();
+  $("#profileUsername").value = me.username;
+  $("#profileEmail").value = me.email || "";
+  const prev = $("#profileAvatarPreview");
+  if (me.avatarUrl) {
+    prev.style.backgroundImage = "url(" + me.avatarUrl + "?t=" + Date.now() + ")";
+    prev.textContent = "";
+  } else {
+    prev.style.backgroundImage = "";
+    prev.textContent = me.username.charAt(0).toUpperCase();
+  }
+  openModal("profileModal");
+}
+$("#drawerProfile").onclick = () => { if (me) openProfile(); };
+$("#closeProfile").onclick = () => closeModal("profileModal");
+$("#changeAvatarBtn").onclick = () => $("#avatarFile").click();
+$("#profileAvatarPreview").onclick = () => $("#avatarFile").click();
+$("#avatarFile").onchange = async () => {
+  const file = $("#avatarFile").files[0];
+  if (!file) return;
+  try {
+    const res = await fetch("/api/profile/avatar-upload", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": file.type || "image/jpeg" },
+      body: file,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+    me.avatarUrl = data.avatarUrl;
+    updateAuthUI();
+    openProfile();
+    showError("Photo updated");
+  } catch (e) { showError(e.message); }
+};
+$("#saveProfile").onclick = async () => {
+  try {
+    const d = await api("/profile/email", { method: "POST", body: JSON.stringify({ email: $("#profileEmail").value.trim() }) });
+    me.email = d.email;
+    showError("Email saved");
+  } catch (e) { showError(e.message); }
+};
+$("#addDeviceBtn").onclick = async () => {
+  try {
+    const d = await api("/auth/device-code", { method: "POST" });
+    $("#deviceCode").textContent = d.code;
+    $("#deviceQr").innerHTML = "";
+    const url = location.origin + d.pairUrl;
+    new QRCode($("#deviceQr"), { text: url, width: 200, height: 200, colorDark: "#000", colorLight: "#fff", correctLevel: QRCode.CorrectLevel.H });
+    closeModal("profileModal");
+    openModal("deviceModal");
+  } catch (e) { showError(e.message); }
+};
+$("#closeDevice").onclick = () => closeModal("deviceModal");
+
+// Pair flow from ?pair=code
+let pendingPairCode = null;
+$("#cancelPair").onclick = () => { closeModal("pairModal"); pendingPairCode = null; };
+$("#doPair").onclick = async () => {
+  try {
+    const d = await api("/auth/device-pair", {
+      method: "POST",
+      body: JSON.stringify({ code: pendingPairCode, totpCode: $("#pairTotp").value.trim() }),
+    });
+    token = d.token; me = d.user; localStorage.setItem("dc_token", token);
+    closeModal("pairModal");
+    updateAuthUI(); loadRooms(); startHeartbeat();
+    history.replaceState({}, "", "/app.html");
+  } catch (e) { showError(e.message); }
+};
+
+
 let heartbeatTimer = null;
 function startHeartbeat() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
@@ -1263,6 +1367,12 @@ function startHeartbeat() {
 }
 
 (async () => {
+  const params = new URLSearchParams(location.search);
+  const pairCode = params.get("pair");
+  if (pairCode) {
+    pendingPairCode = pairCode;
+    openModal("pairModal");
+  }
   if (token) {
     try {
       const d = await api("/auth/me");
@@ -1273,4 +1383,8 @@ function startHeartbeat() {
   updateAuthUI();
   loadRooms();
   if (me) startHeartbeat();
+  const roomParam = params.get("room");
+  if (roomParam) {
+    setTimeout(() => openRoom(roomParam), 400);
+  }
 })();

@@ -39,3 +39,19 @@ npm run deploy
 ```
 
 Username `admin` is always admin after first registration/login.
+
+
+## Profile photos (R2)
+
+Create the bucket once before first deploy (or after):
+
+```bash
+npx wrangler r2 bucket create durable-chat-avatars
+```
+
+Then `npx wrangler deploy`.
+
+## Landing page
+
+- `/` — public landing (login / view public rooms)
+- `/app.html` — chat application

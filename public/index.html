@@ -5,440 +5,65 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Durable Chat</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
-:root,[data-theme=dark]{
-  --bg:#0e1621;--sidebar:#17212b;--surface:#182533;--surface2:#242f3d;
-  --border:#0e1621;--text:#f5f5f5;--muted:#708499;--accent:#2b5278;
-  --accent-hi:#5288c1;--bubble:#182533;--bubble-mine:#2b5278;
-  --danger:#e53935;--success:#4caf50;--pin-bg:#1e2c3a;
-}
-[data-theme=light]{
-  --bg:#fff;--sidebar:#f0f2f5;--surface:#fff;--surface2:#e8e8e8;
-  --border:#dfe3e8;--text:#222;--muted:#707579;--accent:#3390ec;
-  --accent-hi:#2481cc;--bubble:#fff;--bubble-mine:#effdde;
-  --danger:#e53935;--success:#4caf50;--pin-bg:#f0f4f8;
-}
+:root{--bg:#0e1621;--surface:#17212b;--text:#f5f5f5;--muted:#708499;--accent:#2b5278;--accent-hi:#5288c1}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
-button,input,select,textarea{font-family:inherit;font-size:.95rem}
-button{cursor:pointer;border:none;border-radius:8px;font-weight:500;background:transparent;color:var(--text)}
-input,textarea,select{background:var(--surface2);border:1px solid transparent;border-radius:8px;padding:10px 14px;color:var(--text);width:100%;outline:none}
-input:focus,textarea:focus{border-color:var(--accent-hi)}
-.btn{background:var(--accent-hi);color:#fff;padding:10px 18px}.btn:hover{filter:brightness(1.08)}.btn:disabled{opacity:.5}
-.btn-ghost{background:transparent;color:var(--muted);padding:8px 12px}.btn-ghost:hover{background:var(--surface2);color:var(--text)}
-.btn-danger{background:var(--danger);color:#fff;padding:8px 14px}.btn-sm{padding:6px 12px;font-size:.82rem}
-
-/* Layout */
-.app{display:flex;height:100vh;width:100vw}
-.sidebar{width:360px;min-width:280px;max-width:420px;background:var(--sidebar);display:flex;flex-direction:column;border-right:1px solid rgba(0,0,0,.25);position:relative}
-.sidebar-top{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface)}
-.hamburger{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.3rem}
-.hamburger:hover{background:var(--surface2)}
-.search-wrap{flex:1}
-.search-wrap input{border-radius:20px;padding:8px 14px;background:var(--bg);font-size:.9rem}
-.chat-list{flex:1;overflow-y:auto}
-.chat-item{display:flex;gap:12px;padding:10px 14px;cursor:pointer;align-items:center;border-bottom:1px solid rgba(0,0,0,.12)}
-.chat-item:hover,.chat-item.active{background:var(--surface2)}
-.chat-avatar{width:48px;height:48px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:1.1rem;flex-shrink:0;color:#fff}
-.chat-avatar.public{background:#3d6b4f}.chat-avatar.registered{background:#5c4d7a}.chat-avatar.private{background:#6b3d3d}.chat-avatar.dm{background:#2b5278}
-.chat-meta{flex:1;min-width:0}
-.chat-title{font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.chat-title.dm{font-style:italic}
-.chat-sub{font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.chat-right{text-align:right;flex-shrink:0}
-.chat-time{font-size:.72rem;color:var(--muted)}
-.badge-vis{font-size:.65rem;padding:2px 6px;border-radius:999px;margin-top:4px;display:inline-block}
-.badge-public{background:rgba(76,175,80,.2);color:#81c784}
-.badge-registered{background:rgba(156,124,255,.2);color:#b39ddb}
-.badge-private{background:rgba(229,57,53,.15);color:#ef9a9a}
-
-/* Drawer menu */
-.drawer-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:none}
-.drawer-backdrop.open{display:block}
-.drawer{position:fixed;top:0;left:0;bottom:0;width:280px;background:var(--sidebar);z-index:100;transform:translateX(-100%);transition:transform .2s;display:flex;flex-direction:column}
-.drawer.open{transform:translateX(0)}
-.drawer-header{padding:24px 20px;background:var(--accent)}
-.drawer-header .name{font-weight:700;font-size:1.1rem}
-.drawer-header .sub{font-size:.8rem;opacity:.85;margin-top:4px}
-.drawer-item{display:flex;align-items:center;gap:16px;padding:14px 20px;color:var(--text);font-size:.95rem;width:100%;text-align:left}
-.drawer-item:hover{background:var(--surface2)}
-.drawer-item .ico{width:24px;text-align:center;opacity:.8}
-.drawer-divider{height:1px;background:var(--surface2);margin:6px 0}
-
-/* Main pane */
-.main{flex:1;display:flex;flex-direction:column;background:var(--bg);min-width:0}
-.main-empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted)}
-.main-empty span{background:var(--surface2);padding:8px 16px;border-radius:20px;font-size:.9rem}
-.chat-header{padding:10px 16px;background:var(--surface);display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(0,0,0,.2);min-height:60px}
-.chat-header-info{flex:1;min-width:0}
-.chat-header-title{font-weight:600;font-size:1rem}
-.chat-header-title.dm{font-style:italic}
-.chat-header-sub{font-size:.78rem;color:var(--muted);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.chat-header-actions{display:flex;gap:6px}
-.pin-bar{background:var(--pin-bg);padding:8px 16px;border-bottom:1px solid rgba(0,0,0,.15);cursor:pointer;display:none;align-items:flex-start;gap:10px}
-.pin-bar.open{display:flex}
-.pin-bar .pin-ico{color:var(--accent-hi);font-size:1rem}
-.pin-bar .pin-body{flex:1;min-width:0}
-.pin-bar .pin-label{font-size:.72rem;color:var(--accent-hi);font-weight:600;text-transform:uppercase}
-.pin-bar .pin-text{font-size:.85rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-.messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:6px}
-.msg{max-width:70%;padding:8px 12px;border-radius:12px;background:var(--bubble);font-size:.92rem;position:relative;align-self:flex-start;box-shadow:0 1px 2px rgba(0,0,0,.12)}
-.msg.mine{align-self:flex-end;background:var(--bubble-mine)}
-.msg.deleted{opacity:.6;font-style:italic;color:var(--muted)}
-.msg .meta{font-size:.75rem;color:var(--accent-hi);margin-bottom:2px;font-weight:600}
-.msg.mine .meta{color:rgba(255,255,255,.7)}
-.msg .msg-time{font-size:.68rem;color:var(--muted);text-align:right;margin-top:4px}
-.msg .edited-label{font-size:.7rem;font-style:italic;color:var(--muted);cursor:pointer}
-.msg .edited-label:hover{text-decoration:underline}
-.msg .reply-preview{border-left:3px solid var(--accent-hi);padding:4px 8px;margin-bottom:4px;font-size:.8rem;color:var(--muted);cursor:pointer;background:rgba(0,0,0,.12);border-radius:0 6px 6px 0}
-.msg .forward-badge{font-size:.72rem;color:var(--muted);margin-bottom:4px}
-.msg .reactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.msg .reaction-chip{background:rgba(0,0,0,.2);border-radius:999px;padding:1px 7px;font-size:.78rem;cursor:pointer;position:relative}
-.msg .reaction-chip.mine{outline:1px solid var(--accent-hi)}
-.msg .reaction-chip .tip{display:none;position:absolute;bottom:100%;left:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:.72rem;white-space:nowrap;z-index:5;margin-bottom:4px;color:var(--text)}
-.msg .reaction-chip:hover .tip{display:block}
-.msg-actions{display:none;gap:4px;flex-wrap:wrap;margin-top:4px}
-.msg:hover .msg-actions{display:flex}
-.msg-actions button{background:transparent;color:var(--muted);padding:2px 6px;font-size:.72rem;border-radius:6px}
-.msg-actions button:hover{background:rgba(0,0,0,.15);color:var(--text)}
-.msg.highlight{animation:pulseHighlight 1.6s ease}
-@keyframes pulseHighlight{0%{box-shadow:0 0 0 0 rgba(82,136,193,.7)}50%{box-shadow:0 0 0 8px rgba(82,136,193,.2)}100%{box-shadow:0 0 0 0 transparent}}
-.emoji-picker{display:flex;gap:4px;flex-wrap:wrap;padding:4px;margin-top:4px}
-
-.composer{padding:8px 12px;background:var(--surface);display:flex;flex-direction:column;gap:0}
-.reply-bar{display:none;padding:8px 12px;background:var(--surface2);border-radius:8px 8px 0 0;font-size:.85rem;align-items:center;gap:10px;margin-bottom:0}
-.reply-bar.open{display:flex}
-.composer-row{display:flex;gap:8px;align-items:center;padding:4px 0}
-.composer-row input{border-radius:20px;background:var(--bg);flex:1}
-
-/* Modals */
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:200;padding:16px}
-.modal-backdrop.open{display:flex}
-.modal{background:var(--surface);border-radius:12px;padding:24px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto}
-.modal.wide{max-width:640px}
-.modal h2{margin-bottom:8px;font-size:1.15rem}
-.modal p{color:var(--muted);font-size:.9rem;margin-bottom:14px}
-.modal label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px}
-.field{margin-bottom:14px}
-.modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:8px}
-.secret-box{background:var(--surface2);border-radius:8px;padding:12px;font-family:monospace;font-size:.85rem;word-break:break-all;margin:12px 0}
-#qrcode,#recoverQr{display:flex;justify-content:center;margin:12px 0}
-.degree-option{display:block;padding:10px;border:1px solid var(--surface2);border-radius:8px;margin-bottom:6px;cursor:pointer}
-.degree-option.selected,.degree-option:hover{border-color:var(--accent-hi);background:rgba(82,136,193,.1)}
-.degree-option input{width:auto;margin-right:8px}
-.degree-desc{font-size:.78rem;color:var(--muted);margin:4px 0 0 22px}
-.item{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--surface2);cursor:pointer}
-.item:hover{background:var(--surface2)}
-.empty{text-align:center;padding:32px;color:var(--muted);font-size:.9rem}
-.error-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#c62828;color:#fff;padding:10px 18px;border-radius:8px;z-index:300;display:none;font-size:.9rem;max-width:90%}
-.online-dot{width:8px;height:8px;border-radius:50%;background:var(--success);display:inline-block;margin-right:4px;box-shadow:0 0 4px var(--success)}
-.badge-admin{background:rgba(156,124,255,.25);color:#ce93d8;font-size:.7rem;padding:2px 6px;border-radius:999px}
-.badge-friend{background:rgba(255,193,7,.2);color:#ffc107;font-size:.7rem;padding:2px 6px;border-radius:999px}
-.member-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface2);padding:3px 8px;border-radius:999px;font-size:.78rem;margin:2px}
-.tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap}
-.tab{padding:8px 14px;border-radius:8px;color:var(--muted)}.tab.active{background:var(--surface2);color:var(--text)}
-.sub-tabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
-.sub-tab{padding:6px 12px;border-radius:6px;color:var(--muted);font-size:.85rem}.sub-tab.active{background:var(--surface2);color:var(--text)}
-.history-msg{padding:8px 0;border-bottom:1px solid var(--surface2);font-size:.88rem}
-.history-meta{font-size:.72rem;color:var(--muted)}
-.report-row{border-left:3px solid var(--danger)}
-
-@media(max-width:720px){
-  .sidebar{width:100%;max-width:none}
-  .sidebar.hidden-mobile{display:none}
-  .main{display:none}
-  .main.open-mobile{display:flex}
-}
-
-.sidebar-tabs{display:flex;border-bottom:1px solid rgba(0,0,0,.2);background:var(--surface)}
-.stab{flex:1;padding:10px 6px;font-size:.8rem;font-weight:600;color:var(--muted);border-radius:0;border-bottom:2px solid transparent}
-.stab.active{color:var(--text);border-bottom-color:var(--accent-hi)}
-.stab:hover{background:var(--surface2)}
-
-.chat-item.unread{background:rgba(82,136,193,.12)}
-.chat-item.unread .chat-title{font-weight:700}
-.unread-badge{background:var(--accent-hi);color:#fff;font-size:.7rem;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;font-weight:700}
-.msg .seen-label{font-size:.68rem;color:var(--accent-hi);text-align:right;margin-top:2px}
-.notif-item{padding:12px 14px;border-bottom:1px solid var(--surface2);cursor:pointer}
-.notif-item:hover{background:var(--surface2)}
-.notif-item.unread{background:rgba(82,136,193,.1)}
-.notif-title{font-weight:600;font-size:.9rem}
-.notif-body{font-size:.8rem;color:var(--muted);margin-top:2px}
-.notif-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.card{background:var(--surface);border-radius:16px;padding:40px 32px;max-width:420px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.35)}
+.logo{font-size:1.75rem;font-weight:700;margin-bottom:8px}
+.logo span{color:var(--accent-hi)}
+.tagline{color:var(--muted);font-size:.95rem;margin-bottom:28px;line-height:1.5}
+.ad{font-size:.8rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:24px;padding-top:20px;border-top:1px solid rgba(255,255,255,.08);line-height:1.8}
+.ad strong{color:var(--text);font-weight:600}
+.btn{display:block;width:100%;padding:12px 18px;border:none;border-radius:10px;font-weight:600;font-size:.95rem;cursor:pointer;margin-bottom:10px;font-family:inherit}
+.btn-primary{background:var(--accent-hi);color:#fff}
+.btn-primary:hover{filter:brightness(1.08)}
+.btn-ghost{background:transparent;color:var(--text);border:1px solid rgba(255,255,255,.12)}
+.btn-ghost:hover{background:rgba(255,255,255,.05)}
+.rooms{text-align:left;margin-top:20px;max-height:220px;overflow-y:auto}
+.rooms h3{font-size:.75rem;text-transform:uppercase;color:var(--muted);margin-bottom:8px;letter-spacing:.06em}
+.room{padding:10px 12px;border-radius:8px;background:rgba(0,0,0,.2);margin-bottom:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.room:hover{background:rgba(82,136,193,.15)}
+.room-name{font-weight:500}
+.badge{font-size:.7rem;color:var(--accent-hi)}
+.empty{color:var(--muted);font-size:.9rem;padding:12px 0}
 </style>
 </head>
 <body>
-<div class="app">
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-top">
-      <button class="hamburger" id="menuBtn" title="Menu">☰</button>
-      <div class="search-wrap"><input id="sidebarSearch" placeholder="Search rooms or @user" autocomplete="off"/></div>
-      <button class="hamburger" id="bellBtn" title="Notifications" style="position:relative">🔔<span id="bellBadge" style="display:none;position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;font-size:.65rem;min-width:16px;height:16px;border-radius:8px;line-height:16px">0</span></button>
-    </div>
-    <div class="sidebar-tabs" id="sidebarTabs">
-      <button class="stab active" data-tab="dms">Direct</button>
-      <button class="stab" data-tab="joined">Joined</button>
-      <button class="stab" data-tab="public">Public</button>
-    </div>
-    <div class="chat-list" id="chatList"><div class="empty">Loading…</div></div>
-  </aside>
-
-  <!-- Main -->
-  <main class="main" id="mainPane">
-    <div class="main-empty" id="emptyState"><span>Select a chat to start messaging</span></div>
-    <div id="chatView" style="display:none;flex-direction:column;height:100%">
-      <div class="chat-header">
-        <button class="btn-ghost" id="backMobile" style="display:none">←</button>
-        <div class="chat-header-info">
-          <div class="chat-header-title" id="headerTitle"></div>
-          <div class="chat-header-sub" id="headerSub"></div>
-        </div>
-        <div class="chat-header-actions">
-          <button class="btn-ghost btn-sm" id="headerInviteBtn" style="display:none" title="Add members">👥+</button>
-          <button class="btn-ghost btn-sm" id="headerMembersBtn" style="display:none" title="Members">👥</button>
-          <button class="btn-ghost btn-sm" id="headerManageBtn" style="display:none" title="Settings">⚙</button>
-          <button class="btn-ghost btn-sm" id="headerLeaveBtn" style="display:none" title="Leave room">Leave</button>
-          <button class="btn-ghost btn-sm" id="headerDeleteBtn" style="display:none" title="Delete room">🗑</button>
-        </div>
-      </div>
-      <div class="pin-bar" id="pinBar">
-        <div class="pin-ico">📌</div>
-        <div class="pin-body">
-          <div class="pin-label">Pinned message</div>
-          <div class="pin-text" id="pinText"></div>
-        </div>
-      </div>
-      <div class="messages" id="messages"></div>
-      <div class="composer" id="composer">
-        <div class="reply-bar" id="replyBar">
-          <div style="flex:1"><strong>Replying to <span id="replyToName"></span></strong>
-            <div id="replyToText" style="color:var(--muted);font-size:.8rem"></div></div>
-          <button class="btn-ghost btn-sm" id="cancelReply">✕</button>
-        </div>
-        <div class="composer-row" id="chatInputRow">
-          <input id="msgInput" placeholder="Write a message…" maxlength="2000" autocomplete="off"/>
-          <button class="btn btn-sm" id="sendBtn">Send</button>
-        </div>
-        <div id="loginToChat" style="display:none;padding:12px;text-align:center;color:var(--muted);font-size:.9rem">Log in to chat</div>
-      </div>
-    </div>
-  </main>
+<div class="card">
+  <div class="logo">Durable<span>Chat</span></div>
+  <p class="tagline">Secure messaging for your team.</p>
+  <button class="btn btn-primary" id="goApp">Log in / Register</button>
+  <button class="btn btn-ghost" id="showPublic">View public rooms</button>
+  <div class="rooms" id="publicRooms" style="display:none"></div>
+  <div class="ad">
+    <strong>Private conversation</strong><br/>
+    NO LOGS policy<br/>
+    Total privacy
+  </div>
 </div>
-
-<!-- Drawer -->
-<div class="drawer-backdrop" id="drawerBackdrop"></div>
-<aside class="drawer" id="drawer">
-  <div class="drawer-header">
-    <div class="name" id="drawerName">Guest</div>
-    <div class="sub" id="drawerSub">Not logged in</div>
-  </div>
-  <button class="drawer-item" id="drawerTheme"><span class="ico">🎨</span> <span id="themeLabel">Light mode</span></button>
-  <button class="drawer-item" id="drawerAuth"><span class="ico">🔑</span> Log in / Register</button>
-  <button class="drawer-item" id="drawerContacts" style="display:none"><span class="ico">👥</span> Contacts</button>
-    <button class="drawer-item" id="drawerCreate" style="display:none"><span class="ico">➕</span> Create room</button>
-  <button class="drawer-item" id="drawerBlocked" style="display:none"><span class="ico">🚫</span> Blocked users</button>
-  <button class="drawer-item" id="drawerAdmin" style="display:none"><span class="ico">🛡</span> Admin</button>
-  <div class="drawer-divider"></div>
-  <button class="drawer-item" id="drawerLogout" style="display:none;color:var(--danger)"><span class="ico">🚪</span> Log out</button>
-</aside>
-
-<div class="error-toast" id="errorBanner"></div>
-
-<!-- Auth modal -->
-<div class="modal-backdrop" id="authModal"><div class="modal">
-  <h2 id="authTitle">Welcome</h2><p id="authDesc"></p>
-  <div id="authStep-choice">
-    <button class="btn" style="width:100%;margin-bottom:10px" id="showLogin">Log in</button>
-    <button class="btn-ghost" style="width:100%;border:1px solid var(--surface2)" id="showRegister">Create account</button>
-  </div>
-  <div id="authStep-login" style="display:none">
-    <div class="field"><label>Username</label><input id="loginUsername"/></div>
-    <div class="field"><label>Authenticator code</label><input id="loginCode" maxlength="6" inputmode="numeric"/></div>
-    <div class="modal-actions"><button class="btn-ghost" id="backToChoice1">Back</button><button class="btn" id="doLogin">Log in</button></div>
-  </div>
-  <div id="authStep-register-user" style="display:none">
-    <div class="field"><label>Username</label><input id="regUsername" placeholder="3-20 chars a-z 0-9 _"/></div>
-    <div class="modal-actions"><button class="btn-ghost" id="backToChoice2">Back</button><button class="btn" id="checkUsername">Continue</button></div>
-  </div>
-  <div id="authStep-register-totp" style="display:none">
-    <p>Scan with Google Authenticator / Authy / etc.</p>
-    <div id="qrcode"></div>
-    <div class="secret-box" id="secretText"></div>
-    <div class="field"><label>6-digit code</label><input id="regCode" maxlength="6" inputmode="numeric"/></div>
-    <div class="modal-actions"><button class="btn-ghost" id="backToUser">Back</button><button class="btn" id="completeReg">Create account</button></div>
-  </div>
-</div></div>
-
-<!-- Create room -->
-<div class="modal-backdrop" id="createRoomModal"><div class="modal">
-  <h2>Create a room</h2>
-  <div class="field"><label>Name</label><input id="newRoomName" maxlength="60"/></div>
-  <div class="field"><label>Visibility</label>
-    <select id="newRoomVis">
-      <option value="public">Public</option>
-      <option value="registered">Registered only</option>
-      <option value="private">Private (invite-only)</option>
-    </select>
-  </div>
-  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-    <input type="checkbox" id="newRoomSearchable" style="width:auto"/> Searchable
-  </label>
-  <div style="font-size:.78rem;color:var(--muted);margin-top:4px">Others can find this room by name and request to join (needs approval).</div>
-  </div>
-  <div id="privateOpts" style="display:none">
-    <div class="field"><label>Who can be invited?</label>
-      <label class="degree-option selected"><input type="radio" name="inviteDegree" value="contacts" checked/> Only contacts
-        <div class="degree-desc">Only people already in the adder's contact list.</div></label>
-      <label class="degree-option"><input type="radio" name="inviteDegree" value="contacts_of_contacts"/> Contacts of contacts
-        <div class="degree-desc">Contacts, or contacts of those contacts.</div></label>
-      <label class="degree-option"><input type="radio" name="inviteDegree" value="all"/> Anyone
-        <div class="degree-desc">Any registered user.</div></label>
-    </div>
-    <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-      <input type="checkbox" id="allowMembersInvite" style="width:auto"/> Allow members to invite others
-    </label></div>
-    <div class="field"><label>Add contacts now</label>
-      <div id="createMemberPicker" style="max-height:140px;overflow:auto;border:1px solid var(--surface2);border-radius:8px;padding:8px"></div>
-    </div>
-  </div>
-  <div class="modal-actions"><button class="btn-ghost" id="cancelCreateRoom">Cancel</button><button class="btn" id="doCreateRoom">Create</button></div>
-</div></div>
-
-<!-- Contacts / Search / Admin / Members panels as modals -->
-<div class="modal-backdrop" id="contactsModal"><div class="modal wide">
-  <h2>Contacts</h2>
-  <div id="contactsList"><div class="empty">Loading…</div></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeContacts">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="searchModal"><div class="modal wide">
-  <h2>Search users</h2>
-  <div class="field"><input id="searchInput" placeholder="Search users…"/></div>
-  <div id="searchResults"><div class="empty">Type to search</div></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeSearch">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="adminModal"><div class="modal wide">
-  <h2>Admin</h2>
-  <div class="sub-tabs">
-    <button class="sub-tab active" data-admin="online">Online</button>
-    <button class="sub-tab" data-admin="users">All users</button>
-    <button class="sub-tab" data-admin="admins">Admins</button>
-    <button class="sub-tab" data-admin="lookup">Lookup</button>
-    <button class="sub-tab" data-admin="reports">Reports</button>
-  </div>
-  <div id="admin-online"><div class="empty">Loading…</div></div>
-  <div id="admin-users" style="display:none"></div>
-  <div id="admin-admins" style="display:none"></div>
-  <div id="admin-lookup" style="display:none">
-    <div class="field"><input id="adminSearchInput" placeholder="Search username…"/></div>
-    <div id="adminSearchResults"><div class="empty">Type to search</div></div>
-  </div>
-  <div id="admin-reports" style="display:none"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeAdmin">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="membersModal"><div class="modal">
-  <h2>Members</h2>
-  <div id="membersList"></div>
-  <div class="field" style="margin-top:12px" id="addMemberSection">
-    <label>Add from contacts</label>
-    <div id="addMemberPicker" style="max-height:160px;overflow:auto;border:1px solid var(--surface2);border-radius:8px;padding:8px"></div>
-  </div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeMembers">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="adminUserModal"><div class="modal wide">
-  <h2 id="adminUserTitle">User</h2><p id="adminUserMeta"></p>
-  <div id="adminUserActions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
-  <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">Contacts</div>
-  <div id="adminContacts" style="max-height:120px;overflow:auto;margin-bottom:12px"></div>
-  <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">Message history</div>
-  <div id="adminHistory" style="max-height:200px;overflow:auto"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeAdminUser">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="reportModal"><div class="modal">
-  <h2>Report user</h2>
-  <p>Reporting <strong id="reportUsername"></strong>. They will not be notified.</p>
-  <div class="field"><label>Reason</label><textarea id="reportReason" rows="4"></textarea></div>
-  <div class="modal-actions"><button class="btn-ghost" id="cancelReport">Cancel</button><button class="btn btn-danger" id="submitReport">Submit report</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="forwardModal"><div class="modal">
-  <h2>Forward message</h2>
-  <p>Choose a contact to DM this message to.</p>
-  <div id="forwardContactList" style="max-height:240px;overflow:auto"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="cancelForward">Cancel</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="editHistoryModal"><div class="modal">
-  <h2>Edit history</h2>
-  <div id="editHistoryList"></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeEditHistory">Close</button></div>
-</div></div>
-
-<div class="modal-backdrop" id="recoverModal"><div class="modal">
-  <h2>Account recovery</h2>
-  <p>New secret for <strong id="recoverUsername"></strong></p>
-  <div id="recoverQr"></div>
-  <div class="secret-box" id="recoverSecret"></div>
-  <div class="modal-actions"><button class="btn" id="closeRecover">Done</button></div>
-</div></div>
-
-
-<div class="modal-backdrop" id="roomSettingsModal"><div class="modal">
-  <h2>Room settings</h2>
-  <div class="field"><label>Name</label><input id="settingsName" maxlength="60"/></div>
-  <div class="field"><label>Visibility</label>
-    <select id="settingsVis">
-      <option value="public">Public</option>
-      <option value="registered">Registered only</option>
-      <option value="private">Private</option>
-    </select>
-  </div>
-  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-    <input type="checkbox" id="settingsSearchable" style="width:auto"/> Searchable
-  </label></div>
-  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
-    <input type="checkbox" id="settingsAllowInvite" style="width:auto"/> Allow members to invite
-  </label></div>
-  <div class="field"><label>Invite degree</label>
-    <select id="settingsDegree">
-      <option value="contacts">Only contacts</option>
-      <option value="contacts_of_contacts">Contacts of contacts</option>
-      <option value="all">Anyone</option>
-    </select>
-  </div>
-  <div id="settingsAdminsSection" style="margin-top:12px">
-    <div style="font-size:.85rem;color:var(--muted);margin-bottom:6px">Room admins</div>
-    <div id="settingsAdminsList"></div>
-  </div>
-  <div id="settingsJoinSection" style="margin-top:12px">
-    <div style="font-size:.85rem;color:var(--muted);margin-bottom:6px">Pending join requests</div>
-    <div id="settingsJoinList"></div>
-  </div>
-  <div class="modal-actions">
-    <button class="btn-ghost" id="closeSettings">Cancel</button>
-    <button class="btn" id="saveSettings">Save</button>
-  </div>
-</div></div>
-
-
-<div class="modal-backdrop" id="notifModal"><div class="modal wide">
-  <h2>Notifications</h2>
-  <div id="notifList"><div class="empty">None</div></div>
-  <div class="modal-actions"><button class="btn-ghost" id="markAllRead">Mark all read</button><button class="btn-ghost" id="closeNotif">Close</button></div>
-</div></div>
-<div class="modal-backdrop" id="blockedModal"><div class="modal">
-  <h2>Blocked users</h2>
-  <div id="blockedList"><div class="empty">None</div></div>
-  <div class="modal-actions"><button class="btn-ghost" id="closeBlocked">Close</button></div>
-</div></div>
-
-<script src="/app.js"></script>
+<script>
+document.getElementById("goApp").onclick = () => { location.href = "/app.html"; };
+document.getElementById("showPublic").onclick = async () => {
+  const box = document.getElementById("publicRooms");
+  box.style.display = "block";
+  box.innerHTML = "<div class='empty'>Loading…</div>";
+  try {
+    const res = await fetch("/api/public-rooms");
+    const rooms = await res.json();
+    if (!rooms.length) { box.innerHTML = "<div class='empty'>No public rooms yet</div>"; return; }
+    box.innerHTML = "<h3>Public rooms</h3>" + rooms.map(r =>
+      `<div class="room" data-id="${r.id}"><span class="room-name">${r.name.replace(/</g,"&lt;")}</span><span class="badge">public</span></div>`
+    ).join("");
+    box.querySelectorAll(".room").forEach(el => {
+      el.onclick = () => { location.href = "/app.html?room=" + encodeURIComponent(el.dataset.id); };
+    });
+  } catch {
+    box.innerHTML = "<div class='empty'>Could not load rooms</div>";
+  }
+};
+// If already logged in, go to app
+if (localStorage.getItem("dc_token")) location.href = "/app.html";
+</script>
 </body>
 </html>

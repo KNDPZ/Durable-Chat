@@ -106,6 +106,15 @@ export class Hub {
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN invite_degree TEXT NOT NULL DEFAULT 'contacts'"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN restriction_level INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN searchable INTEGER NOT NULL DEFAULT 0"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar_key TEXT"); } catch {}
+      this.state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS device_codes (
+          code TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          expires_at TEXT NOT NULL
+        );
+      `);
       this.state.storage.sql.exec("UPDATE users SET is_admin = 1 WHERE username = 'admin'");
     });
   }
@@ -123,6 +132,8 @@ export class Hub {
       isPrimaryAdmin: r.username === "admin",
       online,
       restrictionLevel: r.restriction_level | 0,
+      email: r.email || null,
+      avatarUrl: r.avatar_key ? "/avatar/" + r.id : null,
     };
   }
 
@@ -464,6 +475,60 @@ export class Hub {
       }
 
 
+
+
+      // Profile: email (for future recovery — no recovery flow yet)
+      if (path === "/profile/email" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const email = String(body.email || "").trim().toLowerCase();
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jerr("Invalid email");
+        this.sql("UPDATE users SET email = ? WHERE id = ?", email || null, me.id);
+        return j({ ok: true, email: email || null });
+      }
+      // Profile: set avatar key after R2 upload (worker sets this)
+      if (path === "/profile/avatar" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const key = body.key ? String(body.key).slice(0, 200) : null;
+        this.sql("UPDATE users SET avatar_key = ? WHERE id = ?", key, me.id);
+        return j({ ok: true, avatarUrl: key ? "/avatar/" + me.id : null });
+      }
+      // Multi-device: create pairing code (valid 10 min)
+      if (path === "/auth/device-code" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const code = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2,"0")).join("");
+        const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        this.sql("DELETE FROM device_codes WHERE user_id = ?", me.id);
+        this.sql("INSERT INTO device_codes (code, user_id, expires_at) VALUES (?, ?, ?)", code, me.id, expires);
+        return j({
+          code,
+          expiresAt: expires,
+          // URL for QR — open on other device
+          pairUrl: "/app.html?pair=" + code,
+        });
+      }
+      // Complete device pairing with TOTP
+      if (path === "/auth/device-pair" && method === "POST") {
+        const code = String(body.code || "").trim().toLowerCase();
+        const row = this.sql("SELECT * FROM device_codes WHERE code = ?", code).toArray()[0];
+        if (!row) return jerr("Invalid or expired code");
+        if (new Date(row.expires_at) < new Date()) {
+          this.sql("DELETE FROM device_codes WHERE code = ?", code);
+          return jerr("Code expired");
+        }
+        const user = this.sql("SELECT * FROM users WHERE id = ?", row.user_id).toArray()[0];
+        if (!user) return jerr("User not found");
+        if (!(await verifyTOTP(user.totp_secret, body.totpCode))) return jerr("Invalid authenticator code");
+        this.sql("DELETE FROM device_codes WHERE code = ?", code);
+        this.sql("UPDATE users SET last_seen = datetime('now') WHERE id = ?", user.id);
+        return j({ user: this.toUser(user), token: this.createSession(user.id) });
+      }
+      // Public rooms list (no auth) for landing page
+      if (path === "/public-rooms" && method === "GET") {
+        const pub = this.sql(
+          "SELECT id, name, visibility, created_at FROM rooms WHERE visibility = 'public' ORDER BY created_at DESC LIMIT 50"
+        ).toArray();
+        return j(pub.map((r) => ({ id: r.id, name: r.name, visibility: r.visibility, createdAt: r.created_at })));
+      }
 
       // Notifications
       if (path === "/notifications" && method === "GET") {
