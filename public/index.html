@@ -156,6 +156,17 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
 .stab{flex:1;padding:10px 6px;font-size:.8rem;font-weight:600;color:var(--muted);border-radius:0;border-bottom:2px solid transparent}
 .stab.active{color:var(--text);border-bottom-color:var(--accent-hi)}
 .stab:hover{background:var(--surface2)}
+
+.chat-item.unread{background:rgba(82,136,193,.12)}
+.chat-item.unread .chat-title{font-weight:700}
+.unread-badge{background:var(--accent-hi);color:#fff;font-size:.7rem;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;font-weight:700}
+.msg .seen-label{font-size:.68rem;color:var(--accent-hi);text-align:right;margin-top:2px}
+.notif-item{padding:12px 14px;border-bottom:1px solid var(--surface2);cursor:pointer}
+.notif-item:hover{background:var(--surface2)}
+.notif-item.unread{background:rgba(82,136,193,.1)}
+.notif-title{font-weight:600;font-size:.9rem}
+.notif-body{font-size:.8rem;color:var(--muted);margin-top:2px}
+.notif-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -164,7 +175,8 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-top">
       <button class="hamburger" id="menuBtn" title="Menu">☰</button>
-      <div class="search-wrap"><input id="sidebarSearch" placeholder="Search" autocomplete="off"/></div>
+      <div class="search-wrap"><input id="sidebarSearch" placeholder="Search rooms or @user" autocomplete="off"/></div>
+      <button class="hamburger" id="bellBtn" title="Notifications" style="position:relative">🔔<span id="bellBadge" style="display:none;position:absolute;top:2px;right:2px;background:var(--danger);color:#fff;font-size:.65rem;min-width:16px;height:16px;border-radius:8px;line-height:16px">0</span></button>
     </div>
     <div class="sidebar-tabs" id="sidebarTabs">
       <button class="stab active" data-tab="dms">Direct</button>
@@ -185,8 +197,10 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
           <div class="chat-header-sub" id="headerSub"></div>
         </div>
         <div class="chat-header-actions">
+          <button class="btn-ghost btn-sm" id="headerInviteBtn" style="display:none" title="Add members">👥+</button>
           <button class="btn-ghost btn-sm" id="headerMembersBtn" style="display:none" title="Members">👥</button>
-          <button class="btn-ghost btn-sm" id="headerManageBtn" style="display:none" title="Manage">⚙</button>
+          <button class="btn-ghost btn-sm" id="headerManageBtn" style="display:none" title="Settings">⚙</button>
+          <button class="btn-ghost btn-sm" id="headerLeaveBtn" style="display:none" title="Leave room">Leave</button>
           <button class="btn-ghost btn-sm" id="headerDeleteBtn" style="display:none" title="Delete room">🗑</button>
         </div>
       </div>
@@ -224,8 +238,8 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   <button class="drawer-item" id="drawerTheme"><span class="ico">🎨</span> <span id="themeLabel">Light mode</span></button>
   <button class="drawer-item" id="drawerAuth"><span class="ico">🔑</span> Log in / Register</button>
   <button class="drawer-item" id="drawerContacts" style="display:none"><span class="ico">👥</span> Contacts</button>
-  <button class="drawer-item" id="drawerSearch" style="display:none"><span class="ico">🔍</span> Search users</button>
-  <button class="drawer-item" id="drawerCreate" style="display:none"><span class="ico">➕</span> Create room</button>
+    <button class="drawer-item" id="drawerCreate" style="display:none"><span class="ico">➕</span> Create room</button>
+  <button class="drawer-item" id="drawerBlocked" style="display:none"><span class="ico">🚫</span> Blocked users</button>
   <button class="drawer-item" id="drawerAdmin" style="display:none"><span class="ico">🛡</span> Admin</button>
   <div class="drawer-divider"></div>
   <button class="drawer-item" id="drawerLogout" style="display:none;color:var(--danger)"><span class="ico">🚪</span> Log out</button>
@@ -411,6 +425,18 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
     <button class="btn-ghost" id="closeSettings">Cancel</button>
     <button class="btn" id="saveSettings">Save</button>
   </div>
+</div></div>
+
+
+<div class="modal-backdrop" id="notifModal"><div class="modal wide">
+  <h2>Notifications</h2>
+  <div id="notifList"><div class="empty">None</div></div>
+  <div class="modal-actions"><button class="btn-ghost" id="markAllRead">Mark all read</button><button class="btn-ghost" id="closeNotif">Close</button></div>
+</div></div>
+<div class="modal-backdrop" id="blockedModal"><div class="modal">
+  <h2>Blocked users</h2>
+  <div id="blockedList"><div class="empty">None</div></div>
+  <div class="modal-actions"><button class="btn-ghost" id="closeBlocked">Close</button></div>
 </div></div>
 
 <script src="/app.js"></script>

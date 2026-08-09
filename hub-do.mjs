@@ -82,6 +82,23 @@ export class Hub {
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           PRIMARY KEY (room_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS notifications (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT,
+          data TEXT,
+          read INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS last_read (
+          user_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          last_read_at TEXT NOT NULL,
+          PRIMARY KEY (user_id, room_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read);
       `);
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN last_seen TEXT"); } catch {}
@@ -254,7 +271,15 @@ export class Hub {
           if (!me) return jerr("Login required", 401);
           if (!this.isMember(room.id, me.id) && me.username !== "admin") return jerr("Private room", 403);
         }
-        const members = room.visibility === "private" ? this.listMembers(room.id) : [];
+        let members = room.visibility === "private" ? this.listMembers(room.id) : [];
+        if (me && members.length) {
+          members = members.map((m) => {
+            if (m.id !== me.id && this.isBlocked(me.id, m.id)) {
+              return { ...m, username: "Anonymous", anonymous: true };
+            }
+            return m;
+          });
+        }
         // Primary admin can view private room meta for surveillance
         if (room.visibility === "private" && me && me.username === "admin" && !members.find((m) => m.id === me.id)) {
           // allow without membership
@@ -281,19 +306,26 @@ export class Hub {
 
       // Search
       if (path === "/users/search" && method === "GET") {
-        const q = "%" + (url.searchParams.get("q") || "").trim().toLowerCase() + "%";
-        if (q === "%%") return j([]);
+        let raw = (url.searchParams.get("q") || "").trim().toLowerCase();
+        if (raw.startsWith("@")) raw = raw.slice(1);
+        if (!raw) return j([]);
+        const q = "%" + raw + "%";
         let rows;
         if (me) {
           rows = this.sql(
             `SELECT * FROM users WHERE username LIKE ? AND id != ?
              AND id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ?)
-             ORDER BY username LIMIT 40`, q, me.id, me.id
+             AND id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)
+             ORDER BY username LIMIT 40`, q, me.id, me.id, me.id
           ).toArray();
         } else {
           rows = this.sql("SELECT * FROM users WHERE username LIKE ? ORDER BY username LIMIT 40", q).toArray();
         }
-        return j(rows.map((r) => this.toUser(r)));
+        return j(rows.map((r) => {
+          const u = this.toUser(r);
+          if (me) u.isContact = this.isContact(me.id, r.id);
+          return u;
+        }));
       }
 
       // Contacts
@@ -432,6 +464,134 @@ export class Hub {
       }
 
 
+
+      // Notifications
+      if (path === "/notifications" && method === "GET") {
+        if (!me) return jerr("Login required", 401);
+        const rows = this.sql(
+          "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", me.id
+        ).toArray();
+        return j(rows.map((r) => ({
+          id: r.id, type: r.type, title: r.title, body: r.body,
+          data: r.data ? JSON.parse(r.data) : null,
+          read: !!r.read, createdAt: r.created_at,
+        })));
+      }
+      if (path === "/notifications/read" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        if (body.id) this.sql("UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?", body.id, me.id);
+        else this.sql("UPDATE notifications SET read = 1 WHERE user_id = ?", me.id);
+        return j({ ok: true });
+      }
+      if (path === "/notifications/unread-count" && method === "GET") {
+        if (!me) return j({ count: 0 });
+        const row = this.sql("SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read = 0", me.id).toArray()[0];
+        return j({ count: row?.c || 0 });
+      }
+
+      // Mark room as read + get unread counts
+      if (path === "/rooms/mark-read" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = body.roomId;
+        if (!roomId) return jerr("roomId required");
+        this.sql(
+          "INSERT OR REPLACE INTO last_read (user_id, room_id, last_read_at) VALUES (?, ?, datetime('now'))",
+          me.id, roomId
+        );
+        // For DMs: store seen marker for peer
+        if (roomId.startsWith("dm:")) {
+          // peer will see seen via last_read of this user
+        }
+        return j({ ok: true });
+      }
+      if (path === "/rooms/unread" && method === "GET") {
+        if (!me) return j({});
+        // Return map roomId -> unread count from message_log after last_read
+        const rooms = this.sql(
+          `SELECT DISTINCT r.id FROM rooms r
+           LEFT JOIN room_members m ON m.room_id = r.id
+           WHERE r.created_by = ? OR m.user_id = ? OR ? = 'admin'`,
+          me.id, me.id, me.username
+        ).toArray();
+        const out = {};
+        for (const r of rooms) {
+          const lr = this.sql("SELECT last_read_at FROM last_read WHERE user_id = ? AND room_id = ?", me.id, r.id).toArray()[0];
+          let cnt;
+          if (lr) {
+            cnt = this.sql(
+              "SELECT COUNT(*) AS c FROM message_log WHERE room_id = ? AND created_at > ? AND user_id != ?",
+              r.id, lr.last_read_at, me.id
+            ).toArray()[0];
+          } else {
+            cnt = this.sql(
+              "SELECT COUNT(*) AS c FROM message_log WHERE room_id = ? AND user_id != ?",
+              r.id, me.id
+            ).toArray()[0];
+          }
+          if (cnt && cnt.c > 0) out[r.id] = cnt.c;
+        }
+        return j(out);
+      }
+
+      // DM seen: last message read by peer?
+      if (path === "/dm/seen" && method === "GET") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = url.searchParams.get("roomId");
+        if (!roomId || !roomId.startsWith("dm:")) return j({ seen: false });
+        const members = this.listMembers(roomId);
+        const peer = members.find((m) => m.id !== me.id);
+        if (!peer) return j({ seen: false });
+        // last message by me
+        const lastMine = this.sql(
+          "SELECT created_at FROM message_log WHERE room_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1",
+          roomId, me.id
+        ).toArray()[0];
+        if (!lastMine) return j({ seen: false });
+        const peerRead = this.sql(
+          "SELECT last_read_at FROM last_read WHERE user_id = ? AND room_id = ?",
+          peer.id, roomId
+        ).toArray()[0];
+        const seen = peerRead && peerRead.last_read_at >= lastMine.created_at;
+        return j({ seen: !!seen, seenAt: peerRead?.last_read_at || null });
+      }
+
+      // Leave room
+      if (path === "/rooms/leave" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = body.roomId;
+        const room = this.getRoom(roomId);
+        if (!room) return jerr("Room not found");
+        if (room.createdBy === me.id) return jerr("Creator cannot leave; delete the room instead");
+        this.sql("DELETE FROM room_members WHERE room_id = ? AND user_id = ?", roomId, me.id);
+        this.sql("DELETE FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, me.id);
+        return j({ ok: true });
+      }
+
+      // Block / unblock / list
+      if (path === "/blocks" && method === "GET") {
+        if (!me) return jerr("Login required", 401);
+        const rows = this.sql(
+          `SELECT u.* FROM blocks b JOIN users u ON u.id = b.blocked_id WHERE b.blocker_id = ? ORDER BY u.username`,
+          me.id
+        ).toArray();
+        return j(rows.map((r) => this.toUser(r)));
+      }
+      if (path === "/blocks" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const targetId = body.userId;
+        if (!targetId || targetId === me.id) return jerr("Invalid user");
+        this.sql("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)", me.id, targetId);
+        // remove contacts both ways
+        this.sql("DELETE FROM contacts WHERE (owner_id = ? AND contact_id = ?) OR (owner_id = ? AND contact_id = ?)",
+          me.id, targetId, targetId, me.id);
+        return j({ ok: true });
+      }
+      if (path === "/blocks/remove" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        this.sql("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?", me.id, body.userId);
+        return j({ ok: true });
+      }
+
       // Search rooms + contacts (partial match)
       if (path === "/search" && method === "GET") {
         const q = (url.searchParams.get("q") || "").trim().toLowerCase();
@@ -501,6 +661,9 @@ export class Hub {
         if (action === "approve") {
           this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", roomId, userId, me.id);
           this.sql("UPDATE join_requests SET status = 'approved' WHERE room_id = ? AND user_id = ?", roomId, userId);
+          const roomJ = this.getRoom(roomId);
+          this.notify(userId, "join_approved", "Join approved: " + (roomJ?.name || "room"),
+            "You can now chat in this room", { roomId, roomName: roomJ?.name });
         } else {
           this.sql("UPDATE join_requests SET status = 'denied' WHERE room_id = ? AND user_id = ?", roomId, userId);
         }
@@ -584,6 +747,21 @@ export class Hub {
     }
   }
 
+  notify(userId, type, title, body, data) {
+    this.sql(
+      "INSERT INTO notifications (id, user_id, type, title, body, data) VALUES (?, ?, ?, ?, ?, ?)",
+      crypto.randomUUID(), userId, type, title, body || "", data ? JSON.stringify(data) : null
+    );
+  }
+
+  isBlocked(a, b) {
+    // does a block b or b block a?
+    return !!this.sql(
+      "SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)",
+      a, b, b, a
+    ).toArray()[0];
+  }
+
   isRoomAdmin(roomId, userId) {
     const room = this.getRoom(roomId);
     if (!room) return false;
@@ -645,7 +823,14 @@ export class Hub {
     if (this.sql("SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?", contactId, ownerId).toArray()[0]) {
       return { ok: false, error: "You cannot add this user" };
     }
+    if (this.sql("SELECT 1 FROM blocks WHERE blocker_id = ? AND blocked_id = ?", ownerId, contactId).toArray()[0]) {
+      return { ok: false, error: "You blocked this user" };
+    }
     this.sql("INSERT OR IGNORE INTO contacts (owner_id, contact_id) VALUES (?, ?)", ownerId, contactId);
+    const owner = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", ownerId).toArray()[0]);
+    this.notify(contactId, "contact_added", "@" + (owner?.username || "someone") + " added you as a contact", "", {
+      userId: ownerId, username: owner?.username,
+    });
     return { ok: true };
   }
 
@@ -704,6 +889,11 @@ export class Hub {
       }
     }
     this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", roomId, targetId, adderId);
+    const roomN = this.getRoom(roomId);
+    const adder = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", adderId).toArray()[0]);
+    this.notify(targetId, "added_to_room", "Added to " + (roomN?.name || "a room"),
+      "@" + (adder?.username || "someone") + " added you",
+      { roomId, roomName: roomN?.name });
     return { ok: true };
   }
 

@@ -6,6 +6,8 @@ let selectedCreateMembers = new Set();
 let replyToMsg = null, forwardMsg = null, reportTargetId = null;
 let allRooms = { public: [], private: [] };
 let sidebarTab = "dms";
+let unreadMap = {};
+let dmSeen = false;
 const REACTIONS = ["👍","👎","❤️","😂","😢","😠","🖕"];
 
 const $ = (s) => document.querySelector(s);
@@ -51,7 +53,7 @@ function updateAuthUI() {
     $("#drawerAuth").style.display = "none";
     $("#drawerLogout").style.display = "flex";
     $("#drawerContacts").style.display = "flex";
-    $("#drawerSearch").style.display = "flex";
+    $("#drawerBlocked").style.display = "flex";
     $("#drawerCreate").style.display = "flex";
     $("#drawerAdmin").style.display = me.isAdmin ? "flex" : "none";
   } else {
@@ -60,7 +62,7 @@ function updateAuthUI() {
     $("#drawerAuth").style.display = "flex";
     $("#drawerLogout").style.display = "none";
     $("#drawerContacts").style.display = "none";
-    $("#drawerSearch").style.display = "none";
+    $("#drawerBlocked").style.display = "none";
     $("#drawerCreate").style.display = "none";
     $("#drawerAdmin").style.display = "none";
   }
@@ -73,13 +75,12 @@ $("#drawerLogout").onclick = async () => {
   updateAuthUI(); closeDrawer(); loadRooms(); showEmpty();
 };
 $("#drawerContacts").onclick = () => { closeDrawer(); openModal("contactsModal"); loadContacts(); };
-$("#drawerSearch").onclick = () => { closeDrawer(); openModal("searchModal"); };
 $("#drawerCreate").onclick = () => { closeDrawer(); openCreateRoom(); };
 $("#drawerAdmin").onclick = () => { closeDrawer(); openModal("adminModal"); loadAdminPanel("online"); };
 
 function openModal(id) { $("#" + id).classList.add("open"); }
 function closeModal(id) { $("#" + id).classList.remove("open"); }
-["authModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal","roomSettingsModal"].forEach((id) => {
+["authModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal","roomSettingsModal","notifModal"].forEach((id) => {
   const el = $("#" + id);
   if (el) el.onclick = (e) => { if (e.target === el) closeModal(id); };
 });
@@ -145,7 +146,9 @@ async function loadRooms() {
   try {
     const data = await api("/rooms");
     allRooms = data;
-    renderChatList();
+    try { unreadMap = await api("/rooms/unread"); } catch { unreadMap = {}; }
+    renderChatList($("#sidebarSearch").value);
+    refreshBell();
   } catch {
     $("#chatList").innerHTML = '<div class="empty">Failed to load</div>';
   }
@@ -187,13 +190,15 @@ function renderChatList(filter = "") {
     const letter = title.charAt(0).toUpperCase();
     const titleClass = isDm ? "chat-title dm" : "chat-title";
     const sub = isDm ? "Direct message" : (r.visibility || "");
-    return `<div class="chat-item ${currentRoom && currentRoom.id === r.id ? "active" : ""}" data-id="${r.id}">
+    return `<div class="chat-item ${currentRoom && currentRoom.id === r.id ? "active" : ""} ${unreadMap[r.id] ? "unread" : ""}" data-id="${r.id}">
       <div class="chat-avatar ${vis}">${esc(letter)}</div>
       <div class="chat-meta">
         <div class="${titleClass}">${esc(title)}</div>
         <div class="chat-sub">${esc(sub)}</div>
       </div>
-      <div class="chat-right"><span class="badge-vis badge-${isDm ? "private" : r.visibility}">${isDm ? "dm" : r.visibility}</span></div>
+      <div class="chat-right">
+        ${unreadMap[r.id] ? `<span class="unread-badge">${unreadMap[r.id] > 99 ? "99+" : unreadMap[r.id]}</span>` : `<span class="badge-vis badge-${isDm ? "private" : r.visibility}">${isDm ? "dm" : r.visibility}</span>`}
+      </div>
     </div>`;
   }).join("");
   box.querySelectorAll(".chat-item").forEach((el) => {
@@ -217,6 +222,41 @@ $$(".stab").forEach((t) => {
 
 async function doGlobalSearch(q) {
   try {
+    // @user search
+    if (q.trim().startsWith("@")) {
+      const users = await api("/users/search?q=" + encodeURIComponent(q.trim()));
+      const box = $("#chatList");
+      if (!users.length) { box.innerHTML = '<div class="empty">No users</div>'; return; }
+      box.innerHTML = '<div style="padding:8px 14px;font-size:.72rem;color:var(--muted);text-transform:uppercase">Users</div>' +
+        users.map((u) =>
+          `<div class="chat-item" data-user="${u.id}">
+            <div class="chat-avatar dm">${esc(u.username.charAt(0).toUpperCase())}</div>
+            <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
+            <div class="chat-sub">${u.isContact ? "In contacts" : "Not in contacts"}</div></div>
+            <div class="chat-right">${!u.isContact && me ? `<button class="btn btn-sm add-from-search" data-id="${u.id}">Add contact</button>` : ""}</div>
+          </div>`
+        ).join("");
+      box.querySelectorAll(".add-from-search").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await api("/contacts", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
+            btn.textContent = "Added"; btn.disabled = true;
+          } catch (err) { showError(err.message); }
+        };
+      });
+      box.querySelectorAll("[data-user]").forEach((el) => {
+        el.onclick = async (e) => {
+          if (e.target.closest("button")) return;
+          try {
+            const room = await api("/dm", { method: "POST", body: JSON.stringify({ userId: el.dataset.user }) });
+            await loadRooms();
+            openRoom(room.id);
+          } catch (err) { showError(err.message); }
+        };
+      });
+      return;
+    }
     const data = await api("/search?q=" + encodeURIComponent(q));
     const box = $("#chatList");
     let html = "";
@@ -329,6 +369,15 @@ async function openRoom(roomId) {
     // Members button: only private (not public rooms)
     const isPrivate = data.room.visibility === "private";
     $("#headerMembersBtn").style.display = isPrivate && me ? "inline-block" : "none";
+    const canInvite = isPrivate && me && (data.isCreator || data.isRoomAdmin || data.room.allowMembersInvite);
+    $("#headerInviteBtn").style.display = canInvite ? "inline-block" : "none";
+    const canLeave = isPrivate && me && !data.isCreator && currentMembers.some((m) => m.id === me.id);
+    $("#headerLeaveBtn").style.display = canLeave ? "inline-block" : "none";
+    api("/rooms/mark-read", { method: "POST", body: JSON.stringify({ roomId }) }).then(() => {
+      delete unreadMap[roomId];
+      renderChatList($("#sidebarSearch").value);
+    }).catch(() => {});
+    if (roomId.startsWith("dm:")) refreshDmSeen(roomId); else dmSeen = false;
     const canSettings = me && !currentRoom.id.startsWith("dm:") && (data.isCreator || data.isRoomAdmin || (me.username === "admin"));
     $("#headerManageBtn").style.display = canSettings ? "inline-block" : "none";
     $("#headerManageBtn").title = "Room settings";
@@ -720,6 +769,10 @@ async function sendMsg() {
     $("#msgInput").value = "";
     replyToMsg = null;
     $("#replyBar").classList.remove("open");
+    if (currentRoom.id.startsWith("dm:")) {
+      dmSeen = false;
+      setTimeout(() => refreshDmSeen(currentRoom.id), 500);
+    }
   } catch (e) { showError(e.message); }
 }
 $("#sendBtn").onclick = sendMsg;
@@ -1057,6 +1110,148 @@ $("#submitReport").onclick = async () => {
     showError("Report submitted");
   } catch (e) { showError(e.message); }
 };
+
+
+// Invite / Leave
+$("#headerInviteBtn").onclick = () => openMembersModal(true);
+$("#headerLeaveBtn").onclick = async () => {
+  if (!currentRoom || !confirm("Leave this room?")) return;
+  try {
+    await api("/rooms/leave", { method: "POST", body: JSON.stringify({ roomId: currentRoom.id }) });
+    showEmpty();
+    loadRooms();
+  } catch (e) { showError(e.message); }
+};
+
+async function refreshBell() {
+  if (!me) { const b = $("#bellBadge"); if (b) b.style.display = "none"; return; }
+  try {
+    const d = await api("/notifications/unread-count");
+    const b = $("#bellBadge");
+    if (!b) return;
+    if (d.count > 0) { b.style.display = "block"; b.textContent = d.count > 99 ? "99+" : String(d.count); }
+    else b.style.display = "none";
+  } catch {}
+}
+
+$("#bellBtn").onclick = async () => {
+  if (!me) { showError("Login required"); return; }
+  try {
+    const list = await api("/notifications");
+    const box = $("#notifList");
+    if (!list.length) box.innerHTML = '<div class="empty">No notifications</div>';
+    else {
+      box.innerHTML = list.map((n) => {
+        let actions = "";
+        if (n.type === "contact_added" && n.data) {
+          actions = `<div class="notif-actions">
+            <button class="btn btn-sm notif-msg" data-uid="${n.data.userId}">Message</button>
+            <button class="btn btn-sm notif-add" data-uid="${n.data.userId}">Add back</button>
+            <button class="btn-ghost btn-sm notif-block" data-uid="${n.data.userId}">Block</button>
+          </div>`;
+        }
+        return `<div class="notif-item ${n.read ? "" : "unread"}" data-id="${n.id}" data-type="${n.type}" data-room="${(n.data && n.data.roomId) || ""}">
+          <div class="notif-title">${esc(n.title)}</div>
+          ${n.body ? `<div class="notif-body">${esc(n.body)}</div>` : ""}
+          <div class="notif-body">${new Date(n.createdAt).toLocaleString()}</div>
+          ${actions}
+        </div>`;
+      }).join("");
+      box.querySelectorAll(".notif-item").forEach((el) => {
+        el.onclick = async (e) => {
+          if (e.target.closest("button")) return;
+          try { await api("/notifications/read", { method: "POST", body: JSON.stringify({ id: el.dataset.id }) }); } catch {}
+          if ((el.dataset.type === "join_approved" || el.dataset.type === "added_to_room") && el.dataset.room) {
+            closeModal("notifModal");
+            await loadRooms();
+            openRoom(el.dataset.room);
+          }
+          refreshBell();
+        };
+      });
+      box.querySelectorAll(".notif-msg").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            const room = await api("/dm", { method: "POST", body: JSON.stringify({ userId: btn.dataset.uid }) });
+            closeModal("notifModal");
+            await loadRooms();
+            openRoom(room.id);
+          } catch (err) { showError(err.message); }
+        };
+      });
+      box.querySelectorAll(".notif-add").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          try {
+            await api("/contacts", { method: "POST", body: JSON.stringify({ userId: btn.dataset.uid }) });
+            btn.textContent = "Added"; btn.disabled = true;
+          } catch (err) { showError(err.message); }
+        };
+      });
+      box.querySelectorAll(".notif-block").forEach((btn) => {
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm("Block this user? They will not be notified.")) return;
+          try {
+            await api("/blocks", { method: "POST", body: JSON.stringify({ userId: btn.dataset.uid }) });
+            btn.textContent = "Blocked"; btn.disabled = true;
+          } catch (err) { showError(err.message); }
+        };
+      });
+    }
+    openModal("notifModal");
+    refreshBell();
+  } catch (e) { showError(e.message); }
+};
+$("#closeNotif").onclick = () => closeModal("notifModal");
+$("#markAllRead").onclick = async () => {
+  try { await api("/notifications/read", { method: "POST", body: JSON.stringify({}) }); refreshBell(); $("#bellBtn").click(); }
+  catch (e) { showError(e.message); }
+};
+
+$("#drawerBlocked").onclick = async () => {
+  closeDrawer();
+  try {
+    const list = await api("/blocks");
+    const box = $("#blockedList");
+    if (!list.length) box.innerHTML = '<div class="empty">No blocked users</div>';
+    else {
+      box.innerHTML = list.map((u) =>
+        `<div class="item"><div>@${esc(u.username)}</div>
+         <button class="btn btn-sm unblock" data-id="${u.id}">Unblock</button></div>`
+      ).join("");
+      box.querySelectorAll(".unblock").forEach((btn) => {
+        btn.onclick = async () => {
+          try {
+            await api("/blocks/remove", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
+            $("#drawerBlocked").click();
+          } catch (e) { showError(e.message); }
+        };
+      });
+    }
+    openModal("blockedModal");
+  } catch (e) { showError(e.message); }
+};
+$("#closeBlocked").onclick = () => closeModal("blockedModal");
+
+async function refreshDmSeen(roomId) {
+  try {
+    const d = await api("/dm/seen?roomId=" + encodeURIComponent(roomId));
+    dmSeen = !!d.seen;
+    const mines = [...document.querySelectorAll(".msg.mine")];
+    mines.forEach((el) => { const old = el.querySelector(".seen-label"); if (old) old.remove(); });
+    if (dmSeen && mines.length) {
+      const last = mines[mines.length - 1];
+      if (last && !last.classList.contains("deleted")) {
+        last.insertAdjacentHTML("beforeend", '<div class="seen-label">Seen</div>');
+      }
+    }
+  } catch { dmSeen = false; }
+}
+
+setInterval(() => { if (me) refreshBell(); }, 30000);
+
 
 let heartbeatTimer = null;
 function startHeartbeat() {
