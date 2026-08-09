@@ -5,6 +5,7 @@ let pendingSecret = null, pendingUsername = null, myContacts = [];
 let selectedCreateMembers = new Set();
 let replyToMsg = null, forwardMsg = null, reportTargetId = null;
 let allRooms = { public: [], private: [] };
+let sidebarTab = "dms";
 const REACTIONS = ["👍","👎","❤️","😂","😢","😠","🖕"];
 
 const $ = (s) => document.querySelector(s);
@@ -78,7 +79,7 @@ $("#drawerAdmin").onclick = () => { closeDrawer(); openModal("adminModal"); load
 
 function openModal(id) { $("#" + id).classList.add("open"); }
 function closeModal(id) { $("#" + id).classList.remove("open"); }
-["authModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal"].forEach((id) => {
+["authModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal","roomSettingsModal"].forEach((id) => {
   const el = $("#" + id);
   if (el) el.onclick = (e) => { if (e.target === el) closeModal(id); };
 });
@@ -150,38 +151,47 @@ async function loadRooms() {
   }
 }
 
+
 function renderChatList(filter = "") {
   const q = filter.trim().toLowerCase();
-  const items = [];
-  for (const r of allRooms.public || []) {
-    if (q && !r.name.toLowerCase().includes(q)) continue;
-    items.push({ ...r, kind: "room" });
-  }
-  for (const r of allRooms.private || []) {
-    if (q && !r.name.toLowerCase().includes(q)) continue;
-    items.push({ ...r, kind: r.id.startsWith("dm:") ? "dm" : "private" });
-  }
-  // sort: DMs and private first-ish by name for now
-  items.sort((a, b) => {
-    const order = { dm: 0, private: 1, room: 2 };
-    const ka = a.kind === "dm" ? 0 : a.visibility === "private" ? 1 : 2;
-    const kb = b.kind === "dm" ? 0 : b.visibility === "private" ? 1 : 2;
-    if (ka !== kb) return ka - kb;
-    return (a.name || "").localeCompare(b.name || "");
-  });
   const box = $("#chatList");
-  if (!items.length) { box.innerHTML = '<div class="empty">No chats yet</div>'; return; }
+  let items = [];
+
+  if (sidebarTab === "dms") {
+    items = (allRooms.private || []).filter((r) => r.isDm || (r.id && r.id.startsWith("dm:")));
+  } else if (sidebarTab === "joined") {
+    // private non-DM rooms user is in
+    items = (allRooms.private || []).filter((r) => !r.isDm && !(r.id && r.id.startsWith("dm:")));
+  } else {
+    items = allRooms.public || [];
+  }
+
+  if (q) {
+    items = items.filter((r) => {
+      const name = (r.displayName || r.name || "").toLowerCase();
+      return name.includes(q);
+    });
+  }
+
+  items.sort((a, b) => (a.displayName || a.name || "").localeCompare(b.displayName || b.name || ""));
+
+  if (!items.length) {
+    box.innerHTML = '<div class="empty">' + (q ? "No matches" : "Nothing here yet") + "</div>";
+    return;
+  }
+
   box.innerHTML = items.map((r) => {
-    const isDm = r.id.startsWith("dm:");
+    const isDm = r.isDm || (r.id && r.id.startsWith("dm:"));
     const vis = isDm ? "dm" : r.visibility;
-    const letter = (r.name || "?").replace(/^Direct message$/i, "DM").charAt(0).toUpperCase();
+    const title = r.displayName || r.name || "Chat";
+    const letter = title.charAt(0).toUpperCase();
     const titleClass = isDm ? "chat-title dm" : "chat-title";
-    const title = isDm ? r.name : r.name;
+    const sub = isDm ? "Direct message" : (r.visibility || "");
     return `<div class="chat-item ${currentRoom && currentRoom.id === r.id ? "active" : ""}" data-id="${r.id}">
       <div class="chat-avatar ${vis}">${esc(letter)}</div>
       <div class="chat-meta">
         <div class="${titleClass}">${esc(title)}</div>
-        <div class="chat-sub">${isDm ? "Direct message" : r.visibility}</div>
+        <div class="chat-sub">${esc(sub)}</div>
       </div>
       <div class="chat-right"><span class="badge-vis badge-${isDm ? "private" : r.visibility}">${isDm ? "dm" : r.visibility}</span></div>
     </div>`;
@@ -190,7 +200,93 @@ function renderChatList(filter = "") {
     el.onclick = () => openRoom(el.dataset.id);
   });
 }
-$("#sidebarSearch").oninput = () => renderChatList($("#sidebarSearch").value);
+
+$("#sidebarSearch").oninput = async () => {
+  const q = $("#sidebarSearch").value.trim();
+  if (q.length >= 1) await doGlobalSearch(q);
+  else renderChatList("");
+};
+$$(".stab").forEach((t) => {
+  t.onclick = () => {
+    $$(".stab").forEach((x) => x.classList.remove("active"));
+    t.classList.add("active");
+    sidebarTab = t.dataset.tab;
+    renderChatList($("#sidebarSearch").value);
+  };
+});
+
+async function doGlobalSearch(q) {
+  try {
+    const data = await api("/search?q=" + encodeURIComponent(q));
+    const box = $("#chatList");
+    let html = "";
+    if (data.contacts && data.contacts.length) {
+      html += '<div style="padding:8px 14px;font-size:.72rem;color:var(--muted);text-transform:uppercase">Contacts</div>';
+      html += data.contacts.map((u) =>
+        `<div class="chat-item" data-contact="${u.id}">
+          <div class="chat-avatar dm">${esc(u.username.charAt(0).toUpperCase())}</div>
+          <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
+          <div class="chat-sub">Contact</div></div></div>`
+      ).join("");
+    }
+    if (data.rooms && data.rooms.length) {
+      html += '<div style="padding:8px 14px;font-size:.72rem;color:var(--muted);text-transform:uppercase">Rooms</div>';
+      html += data.rooms.map((r) =>
+        `<div class="chat-item" data-room="${r.id}" data-member="${r.isMember ? 1 : 0}" data-pending="${r.pendingJoin ? 1 : 0}">
+          <div class="chat-avatar ${r.visibility}">${esc((r.name||"?").charAt(0).toUpperCase())}</div>
+          <div class="chat-meta"><div class="chat-title">${esc(r.name)}</div>
+          <div class="chat-sub">${r.isMember ? "Joined" : r.pendingJoin ? "Join pending" : "Searchable · tap to request join"}</div></div>
+          <div class="chat-right"><span class="badge-vis badge-${r.visibility}">${r.visibility}</span></div></div>`
+      ).join("");
+    }
+    // Also filter local list
+    const localQ = q.toLowerCase();
+    const local = [];
+    for (const r of [...(allRooms.private||[]), ...(allRooms.public||[])]) {
+      const name = (r.displayName || r.name || "").toLowerCase();
+      if (name.includes(localQ)) local.push(r);
+    }
+    if (local.length) {
+      html += '<div style="padding:8px 14px;font-size:.72rem;color:var(--muted);text-transform:uppercase">Your chats</div>';
+      html += local.map((r) => {
+        const isDm = r.isDm || (r.id && r.id.startsWith("dm:"));
+        const title = r.displayName || r.name;
+        return `<div class="chat-item" data-id="${r.id}">
+          <div class="chat-avatar ${isDm?"dm":r.visibility}">${esc(title.charAt(0).toUpperCase())}</div>
+          <div class="chat-meta"><div class="chat-title ${isDm?"dm":""}">${esc(title)}</div>
+          <div class="chat-sub">${isDm?"Direct message":r.visibility}</div></div></div>`;
+      }).join("");
+    }
+    if (!html) html = '<div class="empty">No matches</div>';
+    box.innerHTML = html;
+    box.querySelectorAll("[data-id]").forEach((el) => { el.onclick = () => openRoom(el.dataset.id); });
+    box.querySelectorAll("[data-contact]").forEach((el) => {
+      el.onclick = async () => {
+        try {
+          const room = await api("/dm", { method: "POST", body: JSON.stringify({ userId: el.dataset.contact }) });
+          await loadRooms();
+          openRoom(room.id);
+        } catch (e) { showError(e.message); }
+      };
+    });
+    box.querySelectorAll("[data-room]").forEach((el) => {
+      el.onclick = async () => {
+        if (el.dataset.member === "1") { openRoom(el.dataset.room); return; }
+        if (el.dataset.pending === "1") { showError("Join request already pending"); return; }
+        if (!me) { showError("Login required"); return; }
+        if (!confirm("Request to join this room?")) return;
+        try {
+          await api("/rooms/join-request", { method: "POST", body: JSON.stringify({ roomId: el.dataset.room }) });
+          showError("Join request sent");
+          doGlobalSearch(q);
+        } catch (e) { showError(e.message); }
+      };
+    });
+  } catch (e) {
+    renderChatList(q);
+  }
+}
+
 
 function showEmpty() {
   currentRoom = null;
@@ -205,6 +301,15 @@ async function openRoom(roomId) {
     currentRoom = data.room;
     currentMembers = data.members || [];
     activeUsers = data.activeUsers || [];
+    currentRoom.isCreator = !!data.isCreator;
+    currentRoom.isRoomAdmin = !!data.isRoomAdmin;
+    // resolve DM display name
+    if (currentRoom.id.startsWith("dm:")) {
+      const other = currentMembers.filter((m) => !me || m.id !== me.id);
+      currentRoom.displayName = other.length ? other.map((m) => m.username).join(", ") : "Direct message";
+    } else {
+      currentRoom.displayName = currentRoom.name;
+    }
     $("#emptyState").style.display = "none";
     $("#chatView").style.display = "flex";
     renderChatList($("#sidebarSearch").value);
@@ -224,7 +329,9 @@ async function openRoom(roomId) {
     // Members button: only private (not public rooms)
     const isPrivate = data.room.visibility === "private";
     $("#headerMembersBtn").style.display = isPrivate && me ? "inline-block" : "none";
-    $("#headerManageBtn").style.display = isPrivate && me && (isCreator || data.room.allowMembersInvite) ? "inline-block" : "none";
+    const canSettings = me && !currentRoom.id.startsWith("dm:") && (data.isCreator || data.isRoomAdmin || (me.username === "admin"));
+    $("#headerManageBtn").style.display = canSettings ? "inline-block" : "none";
+    $("#headerManageBtn").title = "Room settings";
     connectWS(roomId);
     // mobile
     if (window.innerWidth <= 720) {
@@ -242,9 +349,8 @@ function renderHeader() {
   const subEl = $("#headerSub");
   titleEl.className = "chat-header-title" + (isDm ? " dm" : "");
   if (isDm) {
-    // DM title: other participant
     const other = currentMembers.filter((m) => !me || m.id !== me.id);
-    titleEl.textContent = other.length ? other.map((m) => m.username).join(", ") : currentRoom.name;
+    titleEl.textContent = currentRoom.displayName || (other.length ? other.map((m) => m.username).join(", ") : currentRoom.name);
     subEl.textContent = "Direct message";
   } else if (currentRoom.visibility === "private") {
     titleEl.textContent = currentRoom.name;
@@ -294,11 +400,112 @@ $("#headerDeleteBtn").onclick = async () => {
   } catch (e) { showError(e.message); }
 };
 $("#headerMembersBtn").onclick = () => openMembersModal(false);
-$("#headerManageBtn").onclick = () => openMembersModal(true);
+$("#headerManageBtn").onclick = () => openRoomSettings();
 $("#backMobile").onclick = () => {
   $("#sidebar").classList.remove("hidden-mobile");
   $("#mainPane").classList.remove("open-mobile");
   showEmpty();
+};
+
+
+async function openRoomSettings() {
+  if (!currentRoom) return;
+  $("#settingsName").value = currentRoom.name || "";
+  $("#settingsVis").value = currentRoom.visibility || "public";
+  $("#settingsSearchable").checked = !!currentRoom.searchable;
+  $("#settingsAllowInvite").checked = !!currentRoom.allowMembersInvite;
+  $("#settingsDegree").value = currentRoom.inviteDegree || "contacts";
+  // Name only editable by creator
+  const isCreator = currentRoom.isCreator || (me && currentRoom.createdBy === me.id);
+  $("#settingsName").disabled = !isCreator && !(me && me.username === "admin");
+  // Load admins
+  try {
+    const adm = await api("/rooms/" + currentRoom.id + "/admins");
+    const list = $("#settingsAdminsList");
+    list.innerHTML = (adm.admins || []).map((a) => {
+      const isC = a.id === adm.creatorId;
+      return `<div class="item" style="cursor:default"><div>@${esc(a.username)}${isC ? " (creator)" : ""}</div>
+        ${isCreator && !isC ? `<button class="btn-ghost btn-sm demote-admin" data-id="${a.id}">Remove admin</button>` : ""}</div>`;
+    }).join("") || '<div class="empty" style="padding:8px">No admins</div>';
+    list.querySelectorAll(".demote-admin").forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api("/rooms/" + currentRoom.id + "/admins", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id, remove: true }) });
+          openRoomSettings();
+        } catch (e) { showError(e.message); }
+      };
+    });
+    // Promote members
+    if (isCreator && currentMembers.length) {
+      const adminIds = new Set((adm.admins || []).map((a) => a.id));
+      const promotable = currentMembers.filter((m) => !adminIds.has(m.id));
+      if (promotable.length) {
+        list.innerHTML += '<div style="font-size:.78rem;color:var(--muted);padding:8px 0">Promote member</div>';
+        list.innerHTML += promotable.map((m) =>
+          `<div class="item"><div>@${esc(m.username)}</div><button class="btn btn-sm promote-admin" data-id="${m.id}">Make admin</button></div>`
+        ).join("");
+        list.querySelectorAll(".promote-admin").forEach((btn) => {
+          btn.onclick = async () => {
+            try {
+              await api("/rooms/" + currentRoom.id + "/admins", { method: "POST", body: JSON.stringify({ userId: btn.dataset.id }) });
+              openRoomSettings();
+            } catch (e) { showError(e.message); }
+          };
+        });
+      }
+    }
+  } catch (e) { $("#settingsAdminsList").innerHTML = '<div class="empty">Failed</div>'; }
+  // Join requests
+  try {
+    const reqs = await api("/rooms/" + currentRoom.id + "/join-requests");
+    const jl = $("#settingsJoinList");
+    if (!reqs.length) jl.innerHTML = '<div class="empty" style="padding:8px">None</div>';
+    else {
+      jl.innerHTML = reqs.map((r) =>
+        `<div class="item"><div>@${esc(r.username)}</div>
+         <div style="display:flex;gap:6px">
+           <button class="btn btn-sm approve-join" data-id="${r.userId}">Approve</button>
+           <button class="btn-ghost btn-sm deny-join" data-id="${r.userId}">Deny</button>
+         </div></div>`
+      ).join("");
+      jl.querySelectorAll(".approve-join").forEach((btn) => {
+        btn.onclick = async () => {
+          try {
+            await api("/rooms/" + currentRoom.id + "/join-requests/" + btn.dataset.id, { method: "POST", body: JSON.stringify({ action: "approve" }) });
+            openRoomSettings();
+          } catch (e) { showError(e.message); }
+        };
+      });
+      jl.querySelectorAll(".deny-join").forEach((btn) => {
+        btn.onclick = async () => {
+          try {
+            await api("/rooms/" + currentRoom.id + "/join-requests/" + btn.dataset.id, { method: "POST", body: JSON.stringify({ action: "deny" }) });
+            openRoomSettings();
+          } catch (e) { showError(e.message); }
+        };
+      });
+    }
+  } catch { $("#settingsJoinList").innerHTML = '<div class="empty" style="padding:8px">—</div>'; }
+  openModal("roomSettingsModal");
+}
+
+$("#closeSettings").onclick = () => closeModal("roomSettingsModal");
+$("#saveSettings").onclick = async () => {
+  if (!currentRoom) return;
+  try {
+    const body = {
+      visibility: $("#settingsVis").value,
+      searchable: $("#settingsSearchable").checked,
+      allowMembersInvite: $("#settingsAllowInvite").checked,
+      inviteDegree: $("#settingsDegree").value,
+    };
+    if (!$("#settingsName").disabled) body.name = $("#settingsName").value.trim();
+    const room = await api("/rooms/" + currentRoom.id + "/settings", { method: "POST", body: JSON.stringify(body) });
+    currentRoom = { ...currentRoom, ...room };
+    closeModal("roomSettingsModal");
+    renderHeader();
+    loadRooms();
+  } catch (e) { showError(e.message); }
 };
 
 async function openMembersModal(manage) {
@@ -596,7 +803,11 @@ async function refreshCreateMemberPicker() {
 $("#doCreateRoom").onclick = async () => {
   try {
     const visibility = $("#newRoomVis").value;
-    const body = { name: $("#newRoomName").value.trim(), visibility };
+    const body = {
+      name: $("#newRoomName").value.trim(),
+      visibility,
+      searchable: $("#newRoomSearchable").checked,
+    };
     if (visibility === "private") {
       body.allowMembersInvite = $("#allowMembersInvite").checked;
       body.inviteDegree = document.querySelector('input[name="inviteDegree"]:checked')?.value || "contacts";

@@ -151,6 +151,11 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   .main{display:none}
   .main.open-mobile{display:flex}
 }
+
+.sidebar-tabs{display:flex;border-bottom:1px solid rgba(0,0,0,.2);background:var(--surface)}
+.stab{flex:1;padding:10px 6px;font-size:.8rem;font-weight:600;color:var(--muted);border-radius:0;border-bottom:2px solid transparent}
+.stab.active{color:var(--text);border-bottom-color:var(--accent-hi)}
+.stab:hover{background:var(--surface2)}
 </style>
 </head>
 <body>
@@ -160,6 +165,11 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
     <div class="sidebar-top">
       <button class="hamburger" id="menuBtn" title="Menu">☰</button>
       <div class="search-wrap"><input id="sidebarSearch" placeholder="Search" autocomplete="off"/></div>
+    </div>
+    <div class="sidebar-tabs" id="sidebarTabs">
+      <button class="stab active" data-tab="dms">Direct</button>
+      <button class="stab" data-tab="joined">Joined</button>
+      <button class="stab" data-tab="public">Public</button>
     </div>
     <div class="chat-list" id="chatList"><div class="empty">Loading…</div></div>
   </aside>
@@ -258,6 +268,11 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
       <option value="registered">Registered only</option>
       <option value="private">Private (invite-only)</option>
     </select>
+  </div>
+  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+    <input type="checkbox" id="newRoomSearchable" style="width:auto"/> Searchable
+  </label>
+  <div style="font-size:.78rem;color:var(--muted);margin-top:4px">Others can find this room by name and request to join (needs approval).</div>
   </div>
   <div id="privateOpts" style="display:none">
     <div class="field"><label>Who can be invited?</label>
@@ -358,6 +373,44 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   <div id="recoverQr"></div>
   <div class="secret-box" id="recoverSecret"></div>
   <div class="modal-actions"><button class="btn" id="closeRecover">Done</button></div>
+</div></div>
+
+
+<div class="modal-backdrop" id="roomSettingsModal"><div class="modal">
+  <h2>Room settings</h2>
+  <div class="field"><label>Name</label><input id="settingsName" maxlength="60"/></div>
+  <div class="field"><label>Visibility</label>
+    <select id="settingsVis">
+      <option value="public">Public</option>
+      <option value="registered">Registered only</option>
+      <option value="private">Private</option>
+    </select>
+  </div>
+  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+    <input type="checkbox" id="settingsSearchable" style="width:auto"/> Searchable
+  </label></div>
+  <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+    <input type="checkbox" id="settingsAllowInvite" style="width:auto"/> Allow members to invite
+  </label></div>
+  <div class="field"><label>Invite degree</label>
+    <select id="settingsDegree">
+      <option value="contacts">Only contacts</option>
+      <option value="contacts_of_contacts">Contacts of contacts</option>
+      <option value="all">Anyone</option>
+    </select>
+  </div>
+  <div id="settingsAdminsSection" style="margin-top:12px">
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:6px">Room admins</div>
+    <div id="settingsAdminsList"></div>
+  </div>
+  <div id="settingsJoinSection" style="margin-top:12px">
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:6px">Pending join requests</div>
+    <div id="settingsJoinList"></div>
+  </div>
+  <div class="modal-actions">
+    <button class="btn-ghost" id="closeSettings">Cancel</button>
+    <button class="btn" id="saveSettings">Save</button>
+  </div>
 </div></div>
 
 <script src="/app.js"></script>

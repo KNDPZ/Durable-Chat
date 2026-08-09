@@ -70,12 +70,25 @@ export class Hub {
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           resolved INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS room_admins (
+          room_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          PRIMARY KEY (room_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS join_requests (
+          room_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (room_id, user_id)
+        );
       `);
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN last_seen TEXT"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN allow_members_invite INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN invite_degree TEXT NOT NULL DEFAULT 'contacts'"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN restriction_level INTEGER NOT NULL DEFAULT 0"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN searchable INTEGER NOT NULL DEFAULT 0"); } catch {}
       this.state.storage.sql.exec("UPDATE users SET is_admin = 1 WHERE username = 'admin'");
     });
   }
@@ -102,6 +115,7 @@ export class Hub {
       id: r.id, name: r.name, visibility: r.visibility, createdBy: r.created_by,
       createdAt: r.created_at, allowMembersInvite: !!r.allow_members_invite,
       inviteDegree: r.invite_degree || "contacts",
+      searchable: !!r.searchable,
     };
   }
 
@@ -166,13 +180,36 @@ export class Hub {
         const pub = this.sql("SELECT * FROM rooms WHERE visibility IN ('public','registered') ORDER BY created_at DESC").toArray().map((r) => this.toRoom(r));
         let priv = [];
         if (me) {
-          priv = this.sql(
-            `SELECT DISTINCT r.* FROM rooms r LEFT JOIN room_members m ON m.room_id = r.id
-             WHERE r.visibility = 'private' AND (r.created_by = ? OR m.user_id = ?) ORDER BY r.created_at DESC`,
-            me.id, me.id
-          ).toArray().map((r) => this.toRoom(r));
+          const isPrimary = me.username === "admin";
+          let rows;
+          if (isPrimary) {
+            // primary admin surveillance: all private rooms + DMs
+            rows = this.sql(`SELECT * FROM rooms WHERE visibility = 'private' ORDER BY created_at DESC`).toArray();
+          } else {
+            rows = this.sql(
+              `SELECT DISTINCT r.* FROM rooms r LEFT JOIN room_members m ON m.room_id = r.id
+               WHERE r.visibility = 'private' AND (r.created_by = ? OR m.user_id = ?) ORDER BY r.created_at DESC`,
+              me.id, me.id
+            ).toArray();
+          }
+          priv = rows.map((r) => {
+            const room = this.toRoom(r);
+            if (r.id.startsWith("dm:")) {
+              const members = this.listMembers(r.id);
+              const other = members.find((m) => m.id !== me.id);
+              room.displayName = other ? other.username : "Direct message";
+              room.peerId = other ? other.id : null;
+              room.isDm = true;
+            } else {
+              room.displayName = room.name;
+              room.isDm = false;
+            }
+            return room;
+          });
         }
-        return j({ public: pub, private: priv });
+        // annotate public with displayName
+        const pubOut = pub.map((r) => ({ ...r, displayName: r.name, isDm: false }));
+        return j({ public: pubOut, private: priv });
       }
       if (path === "/rooms" && method === "POST") {
         if (!me) return jerr("Login required", 401);
@@ -215,10 +252,16 @@ export class Hub {
         if (!room) return jerr("Room not found", 404);
         if (room.visibility === "private") {
           if (!me) return jerr("Login required", 401);
-          if (!this.isMember(room.id, me.id) && !me.isAdmin) return jerr("Private room", 403);
+          if (!this.isMember(room.id, me.id) && me.username !== "admin") return jerr("Private room", 403);
         }
         const members = room.visibility === "private" ? this.listMembers(room.id) : [];
-        return j({ room, members, user: me });
+        // Primary admin can view private room meta for surveillance
+        if (room.visibility === "private" && me && me.username === "admin" && !members.find((m) => m.id === me.id)) {
+          // allow without membership
+        }
+        const isCreator = me ? room.createdBy === me.id : false;
+        const isRoomAdmin = me ? this.isRoomAdmin(room.id, me.id) : false;
+        return j({ room, members, user: me, isCreator, isRoomAdmin });
       }
 
       // Log message (called by room DO / worker after post)
@@ -388,11 +431,166 @@ export class Hub {
         return j({ ok: true });
       }
 
+
+      // Search rooms + contacts (partial match)
+      if (path === "/search" && method === "GET") {
+        const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+        if (!q || q.length < 1) return j({ rooms: [], contacts: [] });
+        const like = "%" + q + "%";
+        // Searchable rooms (any visibility) matching name
+        const rooms = this.sql(
+          `SELECT * FROM rooms WHERE searchable = 1 AND lower(name) LIKE ? ORDER BY name LIMIT 30`,
+          like
+        ).toArray().map((r) => {
+          const room = this.toRoom(r);
+          room.isMember = me ? this.isMember(r.id, me.id) : false;
+          room.pendingJoin = me ? !!this.sql(
+            "SELECT 1 FROM join_requests WHERE room_id = ? AND user_id = ? AND status = 'pending'",
+            r.id, me.id
+          ).toArray()[0] : false;
+          return room;
+        });
+        let contacts = [];
+        if (me) {
+          contacts = this.sql(
+            `SELECT u.* FROM contacts c JOIN users u ON u.id = c.contact_id
+             WHERE c.owner_id = ? AND lower(u.username) LIKE ? ORDER BY u.username LIMIT 30`,
+            me.id, like
+          ).toArray().map((r) => this.toUser(r));
+        }
+        return j({ rooms, contacts });
+      }
+
+      // Join request for searchable room
+      if (path === "/rooms/join-request" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = body.roomId;
+        const room = this.getRoom(roomId);
+        if (!room) return jerr("Room not found", 404);
+        if (!room.searchable) return jerr("Room is not searchable");
+        if (this.isMember(roomId, me.id)) return jerr("Already a member");
+        this.sql(
+          "INSERT OR REPLACE INTO join_requests (room_id, user_id, status) VALUES (?, ?, 'pending')",
+          roomId, me.id
+        );
+        return j({ ok: true });
+      }
+
+      // List join requests (room creator or room admin)
+      const joinList = path.match(/^\/rooms\/([^/]+)\/join-requests$/);
+      if (joinList && method === "GET") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = joinList[1];
+        if (!this.isRoomAdmin(roomId, me.id) && me.username !== "admin") return jerr("Room admin only", 403);
+        const rows = this.sql(
+          `SELECT jr.user_id, jr.status, jr.created_at, u.username FROM join_requests jr
+           JOIN users u ON u.id = jr.user_id WHERE jr.room_id = ? AND jr.status = 'pending' ORDER BY jr.created_at`,
+          roomId
+        ).toArray();
+        return j(rows.map((r) => ({ userId: r.user_id, username: r.username, status: r.status, createdAt: r.created_at })));
+      }
+
+      // Approve/deny join
+      const joinAct = path.match(/^\/rooms\/([^/]+)\/join-requests\/([^/]+)$/);
+      if (joinAct && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = joinAct[1];
+        const userId = joinAct[2];
+        if (!this.isRoomAdmin(roomId, me.id) && me.username !== "admin") return jerr("Room admin only", 403);
+        const action = body.action; // approve | deny
+        if (action === "approve") {
+          this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", roomId, userId, me.id);
+          this.sql("UPDATE join_requests SET status = 'approved' WHERE room_id = ? AND user_id = ?", roomId, userId);
+        } else {
+          this.sql("UPDATE join_requests SET status = 'denied' WHERE room_id = ? AND user_id = ?", roomId, userId);
+        }
+        return j({ ok: true });
+      }
+
+      // Update room settings (name, visibility, searchable, invite options)
+      const roomSettings = path.match(/^\/rooms\/([^/]+)\/settings$/);
+      if (roomSettings && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = roomSettings[1];
+        const room = this.getRoom(roomId);
+        if (!room) return jerr("Room not found", 404);
+        const isCreator = room.createdBy === me.id;
+        const isRA = this.isRoomAdmin(roomId, me.id);
+        if (!isCreator && !isRA && me.username !== "admin") return jerr("Not allowed", 403);
+        // Name change: creator only
+        if (body.name != null) {
+          if (!isCreator && me.username !== "admin") return jerr("Only creator can rename room", 403);
+          const name = String(body.name).trim().slice(0, 60);
+          if (!name) return jerr("Name required");
+          this.sql("UPDATE rooms SET name = ? WHERE id = ?", name, roomId);
+        }
+        // Privacy / searchable / invite: creator or room admin
+        if (body.visibility != null) {
+          if (!["public", "private", "registered"].includes(body.visibility)) return jerr("Invalid visibility");
+          this.sql("UPDATE rooms SET visibility = ? WHERE id = ?", body.visibility, roomId);
+        }
+        if (body.searchable != null) {
+          this.sql("UPDATE rooms SET searchable = ? WHERE id = ?", body.searchable ? 1 : 0, roomId);
+        }
+        if (body.allowMembersInvite != null) {
+          this.sql("UPDATE rooms SET allow_members_invite = ? WHERE id = ?", body.allowMembersInvite ? 1 : 0, roomId);
+        }
+        if (body.inviteDegree != null) {
+          if (!["contacts", "contacts_of_contacts", "all"].includes(body.inviteDegree)) return jerr("Invalid degree");
+          this.sql("UPDATE rooms SET invite_degree = ? WHERE id = ?", body.inviteDegree, roomId);
+        }
+        return j(this.getRoom(roomId));
+      }
+
+      // Room admins list / set
+      const roomAdmins = path.match(/^\/rooms\/([^/]+)\/admins$/);
+      if (roomAdmins) {
+        const roomId = roomAdmins[1];
+        if (method === "GET") {
+          if (!me) return jerr("Login required", 401);
+          const room = this.getRoom(roomId);
+          if (!room) return jerr("Room not found", 404);
+          const rows = this.sql(
+            `SELECT u.* FROM room_admins ra JOIN users u ON u.id = ra.user_id WHERE ra.room_id = ? ORDER BY u.username`,
+            roomId
+          ).toArray();
+          return j({ creatorId: room.createdBy, admins: rows.map((r) => this.toUser(r)) });
+        }
+        if (method === "POST") {
+          if (!me) return jerr("Login required", 401);
+          const room = this.getRoom(roomId);
+          if (!room) return jerr("Room not found", 404);
+          // Only creator can assign/remove room admins
+          if (room.createdBy !== me.id && me.username !== "admin") return jerr("Only creator can manage room admins", 403);
+          const targetId = body.userId;
+          if (!targetId) return jerr("userId required");
+          if (targetId === room.createdBy) return jerr("Creator is always admin");
+          if (!this.isMember(roomId, targetId)) return jerr("User must be a member first");
+          if (body.remove) {
+            this.sql("DELETE FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, targetId);
+          } else {
+            this.sql("INSERT OR IGNORE INTO room_admins (room_id, user_id) VALUES (?, ?)", roomId, targetId);
+          }
+          return j({ ok: true });
+        }
+      }
+
+      // Enrich meta with isRoomAdmin, isCreator
+      // (handled by patching getRoom meta path below if needed)
+
       return jerr("Not found", 404);
     } catch (e) {
       return jerr(e.message || "Server error", 500);
     }
   }
+
+  isRoomAdmin(roomId, userId) {
+    const room = this.getRoom(roomId);
+    if (!room) return false;
+    if (room.createdBy === userId) return true;
+    return !!this.sql("SELECT 1 FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, userId).toArray()[0];
+  }
+
 
   createSession(userId) {
     const token = crypto.randomUUID() + crypto.randomUUID();
@@ -459,12 +657,14 @@ export class Hub {
     const allow = visibility === "private" && body.allowMembersInvite ? 1 : 0;
     const degree = body.inviteDegree || "contacts";
     if (!["contacts", "contacts_of_contacts", "all"].includes(degree)) return { error: "Invalid invite degree" };
+    const searchable = body.searchable ? 1 : 0;
     const id = crypto.randomUUID();
     this.sql(
-      "INSERT INTO rooms (id, name, visibility, created_by, allow_members_invite, invite_degree) VALUES (?, ?, ?, ?, ?, ?)",
-      id, name, visibility, me.id, allow, degree
+      "INSERT INTO rooms (id, name, visibility, created_by, allow_members_invite, invite_degree, searchable) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      id, name, visibility, me.id, allow, degree, searchable
     );
     this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", id, me.id, me.id);
+    this.sql("INSERT OR IGNORE INTO room_admins (room_id, user_id) VALUES (?, ?)", id, me.id);
     if (visibility === "private" && Array.isArray(body.memberIds)) {
       for (const mid of body.memberIds) {
         if (mid === me.id) continue;
@@ -510,9 +710,11 @@ export class Hub {
   removeMember(roomId, actorId, targetId) {
     const room = this.getRoom(roomId);
     if (!room) return { ok: false, error: "Room not found" };
-    if (actorId !== room.createdBy && actorId !== targetId) return { ok: false, error: "Only creator can remove" };
+    // Only creator (or self-leave) can remove members — not secondary room admins
+    if (actorId !== room.createdBy && actorId !== targetId) return { ok: false, error: "Only creator can remove members" };
     if (targetId === room.createdBy) return { ok: false, error: "Cannot remove creator" };
     this.sql("DELETE FROM room_members WHERE room_id = ? AND user_id = ?", roomId, targetId);
+    this.sql("DELETE FROM room_admins WHERE room_id = ? AND user_id = ?", roomId, targetId);
     return { ok: true };
   }
 

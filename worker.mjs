@@ -125,7 +125,8 @@ export default {
         if (method === "POST" && !msgId) {
           if (meta.room.visibility === "private") {
             const isMember = (meta.members || []).some((m) => m.id === meta.user.id);
-            if (!isMember && !meta.user.isAdmin) return cors(json({ error: "Private room" }, 403));
+            const isPrimary = meta.user.username === "admin";
+            if (!isMember && !isPrimary) return cors(json({ error: "Private room" }, 403));
           }
           const body = await request.json().catch(() => ({}));
           const postUrl = new URL(request.url);
