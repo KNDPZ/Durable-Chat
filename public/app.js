@@ -14,6 +14,148 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
+function letterAvatar(name, url, sizeClass) {
+  const letter = (name || "?").charAt(0).toUpperCase();
+  if (url) return `<div class="chat-avatar has-img ${sizeClass||""}" style="background-image:url('${esc(url)}')"></div>`;
+  return `<div class="chat-avatar ${sizeClass||""}">${esc(letter)}</div>`;
+}
+
+function groupAvatarStack(previews, count, roomAvatarUrl) {
+  if (roomAvatarUrl) {
+    return `<div class="chat-avatar has-img private" style="background-image:url('${esc(roomAvatarUrl)}')"></div>`;
+  }
+  const list = previews || [];
+  const total = count || list.length;
+  if (!list.length) return `<div class="chat-avatar private">G</div>`;
+  if (total === 1) return letterAvatar(list[0].username, list[0].avatarUrl, "private");
+  // Up to 3 faces; 4th cell is count if more than 4 people, else 4th face if exactly 4
+  let html = '<div class="avatar-stack">';
+  if (total > 4) {
+    list.slice(0, 3).forEach((m, i) => {
+      const bg = m.avatarUrl ? `background-image:url('${esc(m.avatarUrl)}')` : "";
+      const letter = (m.username || "?").charAt(0).toUpperCase();
+      html += `<div class="s s${i+1}" style="${bg}">${m.avatarUrl ? "" : esc(letter)}</div>`;
+    });
+    html += `<div class="s s4">${total - 3}+</div>`;
+  } else {
+    list.slice(0, 4).forEach((m, i) => {
+      const bg = m.avatarUrl ? `background-image:url('${esc(m.avatarUrl)}')` : "";
+      const letter = (m.username || "?").charAt(0).toUpperCase();
+      html += `<div class="s s${i+1}" style="${bg}">${m.avatarUrl ? "" : esc(letter)}</div>`;
+    });
+  }
+  html += "</div>";
+  return html;
+}
+
+function msgAvatarHtml(username, avatarUrl) {
+  const letter = (username || "?").charAt(0).toUpperCase();
+  if (avatarUrl) return `<div class="msg-avatar" style="background-image:url('${esc(avatarUrl)}')"></div>`;
+  return `<div class="msg-avatar">${esc(letter)}</div>`;
+}
+
+// Crop state
+let cropState = { img: null, scale: 1, ox: 0, oy: 0, dragging: false, lx: 0, ly: 0, onDone: null };
+
+function openCropper(file, onDone) {
+  const img = new Image();
+  img.onload = () => {
+    cropState = { img, scale: 1, ox: 0, oy: 0, dragging: false, lx: 0, ly: 0, onDone };
+    $("#cropZoom").value = 100;
+    drawCrop();
+    openModal("cropModal");
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+function drawCrop() {
+  const canvas = $("#cropCanvas");
+  if (!canvas || !cropState.img) return;
+  const ctx = canvas.getContext("2d");
+  const size = 320;
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, size, size);
+  const img = cropState.img;
+  const base = Math.max(size / img.width, size / img.height) * cropState.scale;
+  const w = img.width * base;
+  const h = img.height * base;
+  const x = (size - w) / 2 + cropState.ox;
+  const y = (size - h) / 2 + cropState.oy;
+  ctx.drawImage(img, x, y, w, h);
+  // circle mask overlay
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/2 - 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  // redraw image clipped - simpler approach: dark corners
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function getCroppedBlob() {
+  return new Promise((resolve) => {
+    const size = 320;
+    const out = document.createElement("canvas");
+    out.width = size; out.height = size;
+    const ctx = out.getContext("2d");
+    const img = cropState.img;
+    const base = Math.max(size / img.width, size / img.height) * cropState.scale;
+    const w = img.width * base;
+    const h = img.height * base;
+    const x = (size - w) / 2 + cropState.ox;
+    const y = (size - h) / 2 + cropState.oy;
+    ctx.beginPath();
+    ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(img, x, y, w, h);
+    out.toBlob((b) => resolve(b), "image/jpeg", 0.9);
+  });
+}
+
+$("#cropZoom").oninput = () => {
+  cropState.scale = Number($("#cropZoom").value) / 100;
+  drawCrop();
+};
+(function bindCropDrag() {
+  const canvas = () => $("#cropCanvas");
+  const down = (e) => {
+    cropState.dragging = true;
+    const p = e.touches ? e.touches[0] : e;
+    cropState.lx = p.clientX; cropState.ly = p.clientY;
+  };
+  const move = (e) => {
+    if (!cropState.dragging) return;
+    e.preventDefault();
+    const p = e.touches ? e.touches[0] : e;
+    cropState.ox += p.clientX - cropState.lx;
+    cropState.oy += p.clientY - cropState.ly;
+    cropState.lx = p.clientX; cropState.ly = p.clientY;
+    drawCrop();
+  };
+  const up = () => { cropState.dragging = false; };
+  document.addEventListener("DOMContentLoaded", () => {});
+  setTimeout(() => {
+    const c = $("#cropCanvas");
+    if (!c) return;
+    c.addEventListener("mousedown", down);
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    c.addEventListener("touchstart", down, { passive: true });
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("touchend", up);
+  }, 0);
+})();
+$("#cancelCrop").onclick = () => { closeModal("cropModal"); cropState.onDone = null; };
+$("#applyCrop").onclick = async () => {
+  const blob = await getCroppedBlob();
+  closeModal("cropModal");
+  if (cropState.onDone) cropState.onDone(blob);
+};
+
+
+
 function showError(msg) {
   const el = $("#errorBanner");
   el.textContent = msg;
@@ -195,11 +337,18 @@ function renderChatList(filter = "") {
     const isDm = r.isDm || (r.id && r.id.startsWith("dm:"));
     const vis = isDm ? "dm" : r.visibility;
     const title = r.displayName || r.name || "Chat";
-    const letter = title.charAt(0).toUpperCase();
     const titleClass = isDm ? "chat-title dm" : "chat-title";
     const sub = isDm ? "Direct message" : (r.visibility || "");
+    let avHtml;
+    if (isDm) {
+      avHtml = letterAvatar(title, r.peerAvatarUrl, "dm");
+    } else if (r.visibility === "private") {
+      avHtml = groupAvatarStack(r.memberPreviews, r.memberCount, r.avatarUrl);
+    } else {
+      avHtml = letterAvatar(title, r.avatarUrl, vis);
+    }
     return `<div class="chat-item ${currentRoom && currentRoom.id === r.id ? "active" : ""} ${unreadMap[r.id] ? "unread" : ""}" data-id="${r.id}">
-      <div class="chat-avatar ${vis}">${esc(letter)}</div>
+      ${avHtml}
       <div class="chat-meta">
         <div class="${titleClass}">${esc(title)}</div>
         <div class="chat-sub">${esc(sub)}</div>
@@ -239,7 +388,7 @@ async function doGlobalSearch(q) {
         users.map((u) => {
           if (me && u.id === me.id) {
             return `<div class="chat-item" data-self="1">
-              <div class="chat-avatar dm">${u.avatarUrl ? "" : esc(u.username.charAt(0).toUpperCase())}</div>
+              ${letterAvatar(u.username, u.avatarUrl, "dm")}
               <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
               <div class="chat-sub">That's you — tap for profile</div></div></div>`;
           }
@@ -248,7 +397,7 @@ async function doGlobalSearch(q) {
             <button class="btn-ghost btn-sm block-from-search" data-id="${u.id}">Block</button>
           </div>` : "";
           return `<div class="chat-item" data-user="${u.id}">
-            <div class="chat-avatar dm">${esc(u.username.charAt(0).toUpperCase())}</div>
+            ${letterAvatar(u.username, u.avatarUrl, "dm")}
             <div class="chat-meta"><div class="chat-title dm">@${esc(u.username)}</div>
             <div class="chat-sub">${u.isContact ? "In contacts" : "Not in contacts"}</div></div>
             ${btns}
@@ -494,9 +643,22 @@ async function openRoomSettings() {
   $("#settingsSearchable").checked = !!currentRoom.searchable;
   $("#settingsAllowInvite").checked = !!currentRoom.allowMembersInvite;
   $("#settingsDegree").value = currentRoom.inviteDegree || "contacts";
-  // Name only editable by creator
   const isCreator = currentRoom.isCreator || (me && currentRoom.createdBy === me.id);
   $("#settingsName").disabled = !isCreator && !(me && me.username === "admin");
+  if ($("#settingsAllowAdminAvatar")) {
+    $("#settingsAllowAdminAvatar").checked = !!currentRoom.allowAdminAvatar;
+    $("#settingsAllowAdminAvatarWrap").style.display = isCreator || (me && me.username === "admin") ? "block" : "none";
+  }
+  const canChangePhoto = isCreator || (currentRoom.isRoomAdmin && currentRoom.allowAdminAvatar) || (me && me.username === "admin");
+  $("#changeRoomAvatarBtn").style.display = canChangePhoto ? "inline-block" : "none";
+  const rp = $("#roomAvatarPreview");
+  if (currentRoom.avatarUrl) {
+    rp.style.backgroundImage = "url(" + currentRoom.avatarUrl + "?t=" + Date.now() + ")";
+    rp.textContent = "";
+  } else {
+    rp.style.backgroundImage = "";
+    rp.textContent = (currentRoom.name || "?").charAt(0).toUpperCase();
+  }
   // Load admins
   try {
     const adm = await api("/rooms/" + currentRoom.id + "/admins");
@@ -577,6 +739,7 @@ $("#saveSettings").onclick = async () => {
       searchable: $("#settingsSearchable").checked,
       allowMembersInvite: $("#settingsAllowInvite").checked,
       inviteDegree: $("#settingsDegree").value,
+      allowAdminAvatar: $("#settingsAllowAdminAvatar") ? $("#settingsAllowAdminAvatar").checked : false,
     };
     if (!$("#settingsName").disabled) body.name = $("#settingsName").value.trim();
     const room = await api("/rooms/" + currentRoom.id + "/settings", { method: "POST", body: JSON.stringify(body) });
@@ -654,7 +817,14 @@ function messageHtml(m, blur) {
   if (m.replyTo) {
     html += `<div class="reply-preview" data-goto="${m.replyTo.id}"><strong>@${esc(m.replyTo.username)}</strong> ${esc(m.replyTo.text)}</div>`;
   }
-  html += `<div class="meta">@${esc(m.username)}</div>`;
+  if (!mine) {
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      ${msgAvatarHtml(m.username, m.userId ? "/avatar/" + m.userId : null)}
+      <div class="meta" style="margin:0">@${esc(m.username)}</div>
+    </div>`;
+  } else {
+    html += `<div class="meta">@${esc(m.username)}</div>`;
+  }
   html += `<div class="msg-body">${esc(m.text)}</div>`;
   if (m.editedAt) html += `<div class="edited-label" data-history="${m.id}">edited</div>`;
   const rx = m.reactions || {};
@@ -912,8 +1082,11 @@ async function loadContacts() {
     if (!myContacts.length) { $("#contactsList").innerHTML = '<div class="empty">No contacts yet</div>'; return; }
     $("#contactsList").innerHTML = myContacts.map((c) =>
       `<div class="item" style="cursor:default">
-        <div>${c.user.online ? '<span class="online-dot"></span>' : ""}<strong>@${esc(c.user.username)}</strong>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${letterAvatar(c.user.username, c.user.avatarUrl, "dm").replace('chat-avatar','chat-avatar').replace('width:48','')}
+          <div>${c.user.online ? '<span class="online-dot"></span>' : ""}<strong>@${esc(c.user.username)}</strong>
           ${c.isFriend ? ' <span class="badge-friend">Friends</span>' : ""}</div>
+        </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm msg-contact" data-id="${c.user.id}">Message</button>
           <button class="btn-ghost btn-sm remove-contact" data-id="${c.user.id}">Remove</button>
@@ -1303,22 +1476,25 @@ $("#drawerProfile").onclick = () => { if (me) openProfile(); };
 $("#closeProfile").onclick = () => closeModal("profileModal");
 $("#changeAvatarBtn").onclick = () => $("#avatarFile").click();
 $("#profileAvatarPreview").onclick = () => $("#avatarFile").click();
-$("#avatarFile").onchange = async () => {
+$("#avatarFile").onchange = () => {
   const file = $("#avatarFile").files[0];
   if (!file) return;
-  try {
-    const res = await fetch("/api/profile/avatar-upload", {
-      method: "POST",
-      headers: { Authorization: "Bearer " + token, "Content-Type": file.type || "image/jpeg" },
-      body: file,
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Upload failed");
-    me.avatarUrl = data.avatarUrl;
-    updateAuthUI();
-    openProfile();
-    showError("Photo updated");
-  } catch (e) { showError(e.message); }
+  openCropper(file, async (blob) => {
+    try {
+      const res = await fetch("/api/profile/avatar-upload", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "image/jpeg" },
+        body: blob,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      me.avatarUrl = data.avatarUrl;
+      updateAuthUI();
+      openProfile();
+      showError("Photo updated");
+    } catch (e) { showError(e.message); }
+  });
+  $("#avatarFile").value = "";
 };
 $("#saveProfile").onclick = async () => {
   try {
@@ -1354,6 +1530,31 @@ $("#doPair").onclick = async () => {
     updateAuthUI(); loadRooms(); startHeartbeat();
     history.replaceState({}, "", "/app.html");
   } catch (e) { showError(e.message); }
+};
+
+
+
+$("#changeRoomAvatarBtn").onclick = () => $("#roomAvatarFile").click();
+$("#roomAvatarPreview").onclick = () => { if ($("#changeRoomAvatarBtn").style.display !== "none") $("#roomAvatarFile").click(); };
+$("#roomAvatarFile").onchange = () => {
+  const file = $("#roomAvatarFile").files[0];
+  if (!file || !currentRoom) return;
+  openCropper(file, async (blob) => {
+    try {
+      const res = await fetch("/api/rooms/avatar-upload?roomId=" + encodeURIComponent(currentRoom.id), {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token, "Content-Type": "image/jpeg" },
+        body: blob,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      currentRoom.avatarUrl = data.avatarUrl;
+      openRoomSettings();
+      loadRooms();
+      showError("Room photo updated");
+    } catch (e) { showError(e.message); }
+  });
+  $("#roomAvatarFile").value = "";
 };
 
 

@@ -17,11 +17,20 @@ export default {
       return env.ROOMS.get(env.ROOMS.idFromName(roomId)).fetch(request);
     }
 
-    // Serve avatar from R2
+    // Serve avatar from R2 (user or room)
     if (path.startsWith("/avatar/")) {
-      const userId = path.slice("/avatar/".length).split("/")[0];
-      if (!userId || !env.AVATARS) return new Response("Not found", { status: 404 });
-      const obj = await env.AVATARS.get("avatars/" + userId);
+      if (!env.AVATARS) return new Response("Not found", { status: 404 });
+      let key;
+      if (path.startsWith("/avatar/room/")) {
+        const roomId = path.slice("/avatar/room/".length).split("/")[0];
+        if (!roomId) return new Response("Not found", { status: 404 });
+        key = "avatars/room/" + roomId;
+      } else {
+        const userId = path.slice("/avatar/".length).split("/")[0];
+        if (!userId) return new Response("Not found", { status: 404 });
+        key = "avatars/" + userId;
+      }
+      const obj = await env.AVATARS.get(key);
       if (!obj) return new Response("Not found", { status: 404 });
       const headers = new Headers();
       obj.writeHttpMetadata(headers);
@@ -51,6 +60,34 @@ export default {
         body: JSON.stringify({ key }),
       }));
       return cors(json({ ok: true, avatarUrl: "/avatar/" + meData.user.id + "?t=" + Date.now() }));
+    }
+
+    
+    if (path === "/api/rooms/avatar-upload" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") || "";
+      const hub = env.HUB.get(env.HUB.idFromName("global"));
+      const roomId = new URL(request.url).searchParams.get("roomId");
+      if (!roomId) return cors(json({ error: "roomId required" }, 400));
+      const meRes = await hub.fetch(new Request(new URL("/auth/me", request.url).toString(), {
+        headers: { Authorization: auth },
+      }));
+      const meData = await meRes.json();
+      if (!meData.user) return cors(json({ error: "Login required" }, 401));
+      if (!env.AVATARS) return cors(json({ error: "R2 not configured" }, 503));
+      const ct = request.headers.get("content-type") || "image/jpeg";
+      if (!ct.startsWith("image/")) return cors(json({ error: "Image required" }, 400));
+      const buf = await request.arrayBuffer();
+      if (buf.byteLength > 2 * 1024 * 1024) return cors(json({ error: "Max 2MB" }, 400));
+      const key = "avatars/room/" + roomId;
+      await env.AVATARS.put(key, buf, { httpMetadata: { contentType: ct } });
+      const setRes = await hub.fetch(new Request(new URL("/rooms/avatar", request.url).toString(), {
+        method: "POST",
+        headers: { Authorization: auth, "content-type": "application/json" },
+        body: JSON.stringify({ roomId, key }),
+      }));
+      const setData = await setRes.json();
+      if (!setRes.ok) return cors(json(setData, setRes.status));
+      return cors(json({ ok: true, avatarUrl: "/avatar/room/" + roomId + "?t=" + Date.now() }));
     }
 
     if (path.startsWith("/api/")) {

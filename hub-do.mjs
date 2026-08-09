@@ -108,6 +108,8 @@ export class Hub {
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN searchable INTEGER NOT NULL DEFAULT 0"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN email TEXT"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar_key TEXT"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN avatar_key TEXT"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN allow_admin_avatar INTEGER NOT NULL DEFAULT 0"); } catch {}
       this.state.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS device_codes (
           code TEXT PRIMARY KEY,
@@ -144,6 +146,8 @@ export class Hub {
       createdAt: r.created_at, allowMembersInvite: !!r.allow_members_invite,
       inviteDegree: r.invite_degree || "contacts",
       searchable: !!r.searchable,
+      avatarUrl: r.avatar_key ? "/avatar/room/" + r.id : null,
+      allowAdminAvatar: !!r.allow_admin_avatar,
     };
   }
 
@@ -222,11 +226,16 @@ export class Hub {
           }
           priv = rows.map((r) => {
             const room = this.toRoom(r);
+            const members = this.listMembers(r.id);
+            room.memberPreviews = members.slice(0, 4).map((m) => ({
+              id: m.id, username: m.username, avatarUrl: m.avatarUrl,
+            }));
+            room.memberCount = members.length;
             if (r.id.startsWith("dm:")) {
-              const members = this.listMembers(r.id);
               const other = members.find((m) => m.id !== me.id);
               room.displayName = other ? other.username : "Direct message";
               room.peerId = other ? other.id : null;
+              room.peerAvatarUrl = other ? other.avatarUrl : null;
               room.isDm = true;
             } else {
               room.displayName = room.name;
@@ -767,7 +776,27 @@ export class Hub {
           if (!["contacts", "contacts_of_contacts", "all"].includes(body.inviteDegree)) return jerr("Invalid degree");
           this.sql("UPDATE rooms SET invite_degree = ? WHERE id = ?", body.inviteDegree, roomId);
         }
+        if (body.allowAdminAvatar != null) {
+          if (!isCreator && me.username !== "admin") return jerr("Only creator can change this", 403);
+          this.sql("UPDATE rooms SET allow_admin_avatar = ? WHERE id = ?", body.allowAdminAvatar ? 1 : 0, roomId);
+        }
         return j(this.getRoom(roomId));
+      }
+
+      // Set room avatar key (after R2 upload)
+      if (path === "/rooms/avatar" && method === "POST") {
+        if (!me) return jerr("Login required", 401);
+        const roomId = body.roomId;
+        const room = this.getRoom(roomId);
+        if (!room) return jerr("Room not found");
+        const isCreator = room.createdBy === me.id;
+        const isRA = this.isRoomAdmin(roomId, me.id);
+        if (!isCreator && !(isRA && room.allowAdminAvatar) && me.username !== "admin") {
+          return jerr("Not allowed to change room photo", 403);
+        }
+        const key = body.key ? String(body.key).slice(0, 200) : null;
+        this.sql("UPDATE rooms SET avatar_key = ? WHERE id = ?", key, roomId);
+        return j({ ok: true, avatarUrl: key ? "/avatar/room/" + roomId : null });
       }
 
       // Room admins list / set

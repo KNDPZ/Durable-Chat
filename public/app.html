@@ -167,6 +167,22 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
 .notif-title{font-weight:600;font-size:.9rem}
 .notif-body{font-size:.8rem;color:var(--muted);margin-top:2px}
 .notif-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+
+.avatar-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.avatar-stack{position:relative;width:48px;height:48px;flex-shrink:0}
+.avatar-stack .s{position:absolute;width:26px;height:26px;border-radius:50%;border:2px solid var(--sidebar);background:var(--accent);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700;color:#fff;background-size:cover;background-position:center}
+.avatar-stack .s1{top:0;left:0}
+.avatar-stack .s2{top:0;right:0}
+.avatar-stack .s3{bottom:0;left:0}
+.avatar-stack .s4{bottom:0;right:0;background:#6b3d3d;font-size:.6rem}
+.chat-avatar.has-img{background-size:cover;background-position:center;font-size:0}
+.msg-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:#fff}
+.msg-row{display:flex;gap:8px;align-items:flex-end;max-width:85%}
+.msg-row.mine{align-self:flex-end;flex-direction:row-reverse}
+.crop-wrap{position:relative;width:100%;max-width:320px;margin:0 auto;user-select:none}
+.crop-wrap canvas{width:100%;border-radius:8px;cursor:move;touch-action:none}
+.crop-controls{display:flex;gap:8px;align-items:center;margin-top:12px;justify-content:center;flex-wrap:wrap}
+.crop-controls input[type=range]{width:140px}
 </style>
 </head>
 <body>
@@ -397,6 +413,11 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
 
 <div class="modal-backdrop" id="roomSettingsModal"><div class="modal">
   <h2>Room settings</h2>
+  <div style="text-align:center;margin-bottom:14px">
+    <div id="roomAvatarPreview" style="width:72px;height:72px;border-radius:50%;background:var(--surface2);margin:0 auto 8px;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;cursor:pointer"></div>
+    <button class="btn-ghost btn-sm" id="changeRoomAvatarBtn">Change room photo</button>
+    <input type="file" id="roomAvatarFile" accept="image/*" style="display:none"/>
+  </div>
   <div class="field"><label>Name</label><input id="settingsName" maxlength="60"/></div>
   <div class="field"><label>Visibility</label>
     <select id="settingsVis">
@@ -410,6 +431,9 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   </label></div>
   <div class="field"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
     <input type="checkbox" id="settingsAllowInvite" style="width:auto"/> Allow members to invite
+  </label></div>
+  <div class="field" id="settingsAllowAdminAvatarWrap"><label style="display:flex;gap:8px;align-items:center;cursor:pointer">
+    <input type="checkbox" id="settingsAllowAdminAvatar" style="width:auto"/> Allow room admins to change room photo
   </label></div>
   <div class="field"><label>Invite degree</label>
     <select id="settingsDegree">
@@ -475,6 +499,21 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
   <p>Enter the 6-digit code from your authenticator app to finish pairing.</p>
   <div class="field"><label>Authenticator code</label><input id="pairTotp" maxlength="6" inputmode="numeric"/></div>
   <div class="modal-actions"><button class="btn-ghost" id="cancelPair">Cancel</button><button class="btn" id="doPair">Link device</button></div>
+</div></div>
+
+
+<div class="modal-backdrop" id="cropModal"><div class="modal">
+  <h2>Adjust photo</h2>
+  <p>Drag to position, use slider to zoom, then apply.</p>
+  <div class="crop-wrap"><canvas id="cropCanvas" width="320" height="320"></canvas></div>
+  <div class="crop-controls">
+    <label style="font-size:.85rem;color:var(--muted)">Zoom</label>
+    <input type="range" id="cropZoom" min="100" max="300" value="100"/>
+  </div>
+  <div class="modal-actions">
+    <button class="btn-ghost" id="cancelCrop">Cancel</button>
+    <button class="btn" id="applyCrop">Apply</button>
+  </div>
 </div></div>
 
 <script src="/app.js"></script>
