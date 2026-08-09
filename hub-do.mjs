@@ -231,15 +231,22 @@ export class Hub {
               id: m.id, username: m.username, avatarUrl: m.avatarUrl,
             }));
             room.memberCount = members.length;
-            if (r.id.startsWith("dm:")) {
+            if (r.id.startsWith("dm:") && members.length <= 2) {
               const other = members.find((m) => m.id !== me.id);
               room.displayName = other ? other.username : "Direct message";
               room.peerId = other ? other.id : null;
               room.peerAvatarUrl = other ? other.avatarUrl : null;
               room.isDm = true;
+              room.isGroup = false;
             } else {
               room.displayName = room.name;
               room.isDm = false;
+              room.isGroup = members.length > 2 || !r.id.startsWith("dm:");
+              // former DM converted to group still has dm: id but isGroup true
+              if (r.id.startsWith("dm:") && members.length > 2) {
+                room.isGroup = true;
+                room.convertedFromDm = true;
+              }
             }
             return room;
           });
@@ -542,8 +549,10 @@ export class Hub {
       // Notifications
       if (path === "/notifications" && method === "GET") {
         if (!me) return jerr("Login required", 401);
+        const all = url.searchParams.get("all") === "1";
+        const limit = all ? 200 : 10;
         const rows = this.sql(
-          "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50", me.id
+          "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", me.id, limit
         ).toArray();
         return j(rows.map((r) => ({
           id: r.id, type: r.type, title: r.title, body: r.body,
@@ -951,9 +960,17 @@ export class Hub {
     }
     this.sql("INSERT OR IGNORE INTO contacts (owner_id, contact_id) VALUES (?, ?)", ownerId, contactId);
     const owner = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", ownerId).toArray()[0]);
-    this.notify(contactId, "contact_added", "@" + (owner?.username || "someone") + " added you as a contact", "", {
-      userId: ownerId, username: owner?.username,
-    });
+    const alreadyMutual = this.isContact(contactId, ownerId);
+    if (alreadyMutual) {
+      // Target already had owner as contact — this is "add back"
+      this.notify(contactId, "contact_added_back", "@" + (owner?.username || "someone") + " added you back", "", {
+        userId: ownerId, username: owner?.username,
+      });
+    } else {
+      this.notify(contactId, "contact_added", "@" + (owner?.username || "someone") + " added you as a contact", "", {
+        userId: ownerId, username: owner?.username,
+      });
+    }
     return { ok: true };
   }
 
@@ -1008,9 +1025,11 @@ export class Hub {
   addMember(roomId, adderId, targetId) {
     const room = this.getRoom(roomId);
     if (!room || room.visibility !== "private") return { ok: false, error: "Invalid room" };
-    const isCreator = room.createdBy === adderId;
+    const isCreator = String(room.createdBy) === String(adderId);
+    const isDm = String(roomId).startsWith("dm:");
     if (!this.isMember(roomId, adderId) && !isCreator) return { ok: false, error: "Not a member" };
-    if (!isCreator && !room.allowMembersInvite) return { ok: false, error: "Only creator can add members" };
+    // DMs: any member can add a contact (becomes group at 3+). Groups: creator or allowMembersInvite
+    if (!isDm && !isCreator && !room.allowMembersInvite) return { ok: false, error: "Only creator can add members" };
     if (this.isMember(roomId, targetId)) return { ok: false, error: "Already a member" };
     const degree = room.inviteDegree || "contacts";
     if (degree === "contacts") {
@@ -1024,7 +1043,17 @@ export class Hub {
       }
     }
     this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", roomId, targetId, adderId);
-    const roomN = this.getRoom(roomId);
+    let roomN = this.getRoom(roomId);
+    // DM with 3+ members becomes a group chat (stays private, shown under Joined)
+    if (String(roomId).startsWith("dm:")) {
+      const cnt = this.sql("SELECT COUNT(*) AS c FROM room_members WHERE room_id = ?", roomId).toArray()[0]?.c || 0;
+      if (cnt > 2) {
+        const names = this.listMembers(roomId).map((m) => m.username).slice(0, 3).join(", ");
+        const newName = (roomN?.name && roomN.name !== "Direct message") ? roomN.name : ("Group: " + names);
+        this.sql("UPDATE rooms SET name = ? WHERE id = ?", newName, roomId);
+        roomN = this.getRoom(roomId);
+      }
+    }
     const adder = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", adderId).toArray()[0]);
     this.notify(targetId, "added_to_room", "Added to " + (roomN?.name || "a room"),
       "@" + (adder?.username || "someone") + " added you",
