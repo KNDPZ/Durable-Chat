@@ -122,15 +122,28 @@ export default {
         const meta = await metaRes.json();
         if (!metaRes.ok) return cors(json(meta, metaRes.status));
         if (!meta.user) return cors(json({ error: "Login required" }, 401));
-        const isCreator = meta.room.createdBy === meta.user.id;
-        if (!isCreator && !meta.user.isAdmin) return cors(json({ error: "Only creator can pin" }, 403));
+        const isCreator = String(meta.room.createdBy) === String(meta.user.id);
+        const isRoomAdmin = !!meta.isRoomAdmin || isCreator;
+        const isPrimaryAdmin = meta.user.username === "admin";
         const roomStub = env.ROOMS.get(env.ROOMS.idFromName(roomId));
         if (request.method === "POST") {
           const body = await request.json().catch(() => ({}));
+          const messageId = body.messageId || null;
+          // Pin: only room creator or room admin (not global @admin unless they are creator/room admin)
+          // Unpin: creator, room admin, OR primary @admin
+          if (messageId) {
+            if (!isCreator && !isRoomAdmin) {
+              return cors(json({ error: "Only room creator or room admins can pin" }, 403));
+            }
+          } else {
+            if (!isCreator && !isRoomAdmin && !isPrimaryAdmin) {
+              return cors(json({ error: "Not allowed to unpin" }, 403));
+            }
+          }
           const r = await roomStub.fetch(new Request(new URL("/pin", request.url).toString(), {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ messageId: body.messageId || null }),
+            body: JSON.stringify({ messageId }),
           }));
           return cors(await r.json().then((d) => json(d, r.status)));
         }
@@ -289,13 +302,24 @@ export default {
         
         // Pin
         if (method === "POST" && path.endsWith("/pin")) {
-          const isCreator = meta.room.createdBy === meta.user.id;
-          if (!isCreator && !meta.user.isAdmin) return cors(json({ error: "Only creator can pin" }, 403));
+          const isCreator = String(meta.room.createdBy) === String(meta.user.id);
+          const isRoomAdmin = !!meta.isRoomAdmin || isCreator;
+          const isPrimaryAdmin = meta.user.username === "admin";
           const body = await request.json().catch(() => ({}));
+          const messageId = body.messageId || null;
+          if (messageId) {
+            if (!isCreator && !isRoomAdmin) {
+              return cors(json({ error: "Only room creator or room admins can pin" }, 403));
+            }
+          } else {
+            if (!isCreator && !isRoomAdmin && !isPrimaryAdmin) {
+              return cors(json({ error: "Not allowed to unpin" }, 403));
+            }
+          }
           const r = await roomStub.fetch(new Request(new URL("/pin", request.url).toString(), {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ messageId: body.messageId || null }),
+            body: JSON.stringify({ messageId }),
           }));
           return cors(await r.json().then((d) => json(d, r.status)));
         }

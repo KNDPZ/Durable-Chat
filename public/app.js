@@ -633,8 +633,28 @@ function renderPin(pinned) {
   const bar = $("#pinBar");
   if (pinned && pinned.id) {
     bar.classList.add("open");
-    $("#pinText").textContent = (pinned.username ? pinned.username + ": " : "") + (pinned.text || "");
-    bar.onclick = () => scrollToMessage(pinned.id);
+    const canUnpin = me && currentRoom && (
+      currentRoom.isCreator ||
+      currentRoom.isRoomAdmin ||
+      String(currentRoom.createdBy) === String(me.id) ||
+      me.username === "admin"
+    );
+    $("#pinText").innerHTML =
+      esc((pinned.username ? pinned.username + ": " : "") + (pinned.text || "")) +
+      (canUnpin ? ' <button class="btn-ghost btn-sm" id="unpinBtn" style="margin-left:8px">Unpin</button>' : "");
+    bar.onclick = (e) => {
+      if (e.target && e.target.id === "unpinBtn") return;
+      scrollToMessage(pinned.id);
+    };
+    const ub = $("#unpinBtn");
+    if (ub) {
+      ub.onclick = (e) => {
+        e.stopPropagation();
+        api("/rooms/" + currentRoom.id + "/pin", { method: "POST", body: JSON.stringify({ messageId: null }) })
+          .then((d) => renderPin(d.pinned))
+          .catch((err) => showError(err.message));
+      };
+    }
   } else {
     bar.classList.remove("open");
     bar.onclick = null;
@@ -876,7 +896,7 @@ function messageHtml(m, blur) {
       <button data-act="reply" data-id="${m.id}">Reply</button>
       <button data-act="react" data-id="${m.id}">React</button>
       ${currentRoom && currentRoom.visibility === "public" ? `<button data-act="forward" data-id="${m.id}">Forward</button>` : ""}
-      ${isCreator || (me && me.isAdmin) ? `<button data-act="pin" data-id="${m.id}">Pin</button>` : ""}
+      ${(isCreator || (currentRoom && currentRoom.isRoomAdmin)) ? `<button data-act="pin" data-id="${m.id}">Pin</button>` : ""}
       ${mine ? `<button data-act="edit" data-id="${m.id}">Edit</button><button data-act="delete" data-id="${m.id}">Delete</button>` : ""}
     </div>
     <div class="emoji-picker" id="picker-${m.id}" style="display:none">${REACTIONS.map((e) => `<button data-emoji="${e}" data-id="${m.id}">${e}</button>`).join("")}</div>`;

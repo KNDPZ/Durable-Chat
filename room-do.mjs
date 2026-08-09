@@ -202,6 +202,12 @@ export class ChatRoom {
         if (!row) return json({ error: "Not found" }, 404);
         if (row.user_id !== body.userId && !body.isAdmin) return json({ error: "Not your message" }, 403);
         this.sql("UPDATE messages SET is_deleted = 1, text = '' WHERE id = ?", msgId);
+        // Auto-remove pin if this message was pinned
+        const pinned = (await this.state.storage.get("pinned")) || null;
+        if (pinned && String(pinned.id) === String(msgId)) {
+          await this.state.storage.delete("pinned");
+          this.broadcast({ t: "pin", pinned: null });
+        }
         const msg = this.shapeMessage(this.sql("SELECT * FROM messages WHERE id = ?", msgId).toArray()[0]);
         this.broadcast({ t: "message_update", message: msg });
         return json(msg);
