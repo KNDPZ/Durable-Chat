@@ -110,6 +110,19 @@ export class Hub {
       try { this.state.storage.sql.exec("ALTER TABLE users ADD COLUMN avatar_key TEXT"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN avatar_key TEXT"); } catch {}
       try { this.state.storage.sql.exec("ALTER TABLE rooms ADD COLUMN allow_admin_avatar INTEGER NOT NULL DEFAULT 0"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE reports ADD COLUMN resolved_by TEXT"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE reports ADD COLUMN resolve_action TEXT"); } catch {}
+      try { this.state.storage.sql.exec("ALTER TABLE reports ADD COLUMN resolved_at TEXT"); } catch {}
+      this.state.storage.sql.exec(`
+        CREATE TABLE IF NOT EXISTS admin_logs (
+          id TEXT PRIMARY KEY,
+          actor_id TEXT,
+          actor_username TEXT,
+          action TEXT NOT NULL,
+          detail TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
       this.state.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS device_codes (
           code TEXT PRIMARY KEY,
@@ -463,8 +476,8 @@ export class Hub {
                    du.restriction_level,
                    resolver.username AS resolver_username
             FROM reports r
-            JOIN users ru ON ru.id = r.reporter_id
-            JOIN users du ON du.id = r.reported_id
+            LEFT JOIN users ru ON ru.id = r.reporter_id
+            LEFT JOIN users du ON du.id = r.reported_id
             LEFT JOIN users resolver ON resolver.id = r.resolved_by
             ORDER BY r.resolved ASC, r.created_at DESC
             LIMIT 200
@@ -477,10 +490,10 @@ export class Hub {
             resolveAction: r.resolve_action || null,
             resolvedAt: r.resolved_at || null,
             resolver: r.resolved_by ? { id: r.resolved_by, username: r.resolver_username } : null,
-            reporter: { id: r.reporter_id, username: r.reporter_username },
+            reporter: { id: r.reporter_id, username: r.reporter_username || "unknown" },
             reported: {
               id: r.reported_id,
-              username: r.reported_username,
+              username: r.reported_username || "unknown",
               restrictionLevel: r.restriction_level | 0,
             },
           })));

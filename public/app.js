@@ -1268,7 +1268,7 @@ async function loadAdminPanel(which) {
     el.querySelectorAll("button[data-id]").forEach((btn) => {
       btn.onclick = (e) => { e.stopPropagation(); openAdminUser(btn.dataset.id); };
     });
-  } catch { el.innerHTML = '<div class="empty">Failed</div>'; }
+  } catch (e) { el.innerHTML = '<div class="empty">' + esc(e.message || "Failed") + '</div>'; }
 }
 
 let adminSearchTimer;
