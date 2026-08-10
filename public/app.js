@@ -1199,7 +1199,7 @@ $$(".sub-tab").forEach((st) => {
   st.onclick = () => {
     $$(".sub-tab").forEach((t) => t.classList.remove("active"));
     st.classList.add("active");
-    ["online","users","admins","lookup","reports"].forEach((p) => {
+    ["online","users","admins","lookup","reports","history"].forEach((p) => {
       const el = $("#admin-" + p);
       if (el) el.style.display = st.dataset.admin === p ? "block" : "none";
     });
@@ -1212,23 +1212,49 @@ async function loadAdminPanel(which) {
   if (!el || which === "lookup") return;
   el.innerHTML = '<div class="empty">Loading…</div>';
   try {
+    if (which === "history") {
+      const logs = await api("/admin/history");
+      if (!logs.length) { el.innerHTML = '<div class="empty">No admin history yet</div>'; return; }
+      el.innerHTML = logs.map((l) =>
+        `<div class="history-msg">
+          <div class="history-meta">${new Date(l.createdAt).toLocaleString()} · @${esc(l.actor)} · <strong>${esc(l.action)}</strong></div>
+          <div>${esc(l.detail || "")}</div>
+        </div>`
+      ).join("");
+      return;
+    }
     if (which === "reports") {
       const reports = await api("/admin/reports");
       if (!reports.length) { el.innerHTML = '<div class="empty">No reports</div>'; return; }
-      el.innerHTML = reports.map((r) =>
-        `<div class="item report-row" style="flex-direction:column;align-items:stretch;gap:6px">
-          <div style="display:flex;justify-content:space-between;width:100%">
+      el.innerHTML = reports.map((r) => {
+        const resolved = r.resolved;
+        const actionLabel = r.resolveAction ? r.resolveAction.replace(/_/g, " ") : "";
+        return `<div class="item report-row ${resolved ? "report-resolved" : ""}" style="flex-direction:column;align-items:stretch;gap:6px">
+          <div style="display:flex;justify-content:space-between;width:100%;gap:8px;flex-wrap:wrap">
             <div><strong>@${esc(r.reported.username)}</strong> by @${esc(r.reporter.username)}
-              ${r.resolved ? ' <span class="badge-admin">resolved</span>' : ' <span class="badge-private">open</span>'}
+              ${resolved
+                ? `<span class="badge-resolved">resolved${actionLabel ? ": " + esc(actionLabel) : ""}</span>`
+                : ' <span class="badge-private">open</span>'}
               ${r.reported.restrictionLevel ? ' <span class="badge-private">R'+r.reported.restrictionLevel+'</span>' : ""}
+              ${r.resolver ? `<span style="font-size:.75rem;color:var(--muted)"> · resolver @${esc(r.resolver.username)}</span>` : ""}
             </div>
-            <button class="btn btn-sm" data-id="${r.reported.id}">View</button>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-sm view-reported" data-id="${r.reported.id}">View user</button>
+              ${!resolved ? `<button class="btn btn-sm resolve-report" data-rid="${r.id}" data-uid="${r.reported.id}">Resolve</button>` : ""}
+            </div>
           </div>
           <div style="font-size:.85rem;color:var(--muted)">${esc(r.reason)}</div>
-        </div>`
-      ).join("");
-      el.querySelectorAll("button[data-id]").forEach((btn) => {
+          ${r.resolvedAt ? `<div style="font-size:.72rem;color:var(--muted)">Resolved ${new Date(r.resolvedAt).toLocaleString()}</div>` : ""}
+        </div>`;
+      }).join("");
+      el.querySelectorAll(".view-reported").forEach((btn) => {
         btn.onclick = (e) => { e.stopPropagation(); openAdminUser(btn.dataset.id); };
+      });
+      el.querySelectorAll(".resolve-report").forEach((btn) => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          openResolveReport(btn.dataset.rid, btn.dataset.uid);
+        };
       });
       return;
     }
@@ -1261,6 +1287,37 @@ async function doAdminSearch() {
       btn.onclick = (e) => { e.stopPropagation(); openAdminUser(btn.dataset.id); };
     });
   } catch (e) { showError(e.message); }
+}
+
+
+function openResolveReport(reportId, userId) {
+  const isPrimary = me && me.username === "admin";
+  const choices = [
+    { action: "no_action", label: "Resolve: no action" },
+  ];
+  if (isPrimary) {
+    choices.push(
+      { action: "restrict_L1", label: "Restrict L1" },
+      { action: "restrict_L2", label: "Restrict L2" },
+      { action: "delete_user", label: "Delete user" },
+    );
+  }
+  const pick = prompt(
+    "Resolve report:\n" + choices.map((c, i) => (i + 1) + ") " + c.label).join("\n") + "\n\nEnter number:",
+    "1"
+  );
+  if (pick == null) return;
+  const idx = parseInt(pick, 10) - 1;
+  if (idx < 0 || idx >= choices.length) { showError("Invalid choice"); return; }
+  const action = choices[idx].action;
+  if (action === "delete_user" && !confirm("Permanently delete this user?")) return;
+  api("/admin/reports/" + reportId + "/resolve", {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  }).then(() => {
+    showError("Report resolved");
+    loadAdminPanel("reports");
+  }).catch((e) => showError(e.message));
 }
 
 async function openAdminUser(userId) {

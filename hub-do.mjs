@@ -189,6 +189,7 @@ export class Hub {
         const id = crypto.randomUUID();
         const isAdmin = clean === "admin" ? 1 : 0;
         this.sql("INSERT INTO users (id, username, totp_secret, is_admin, last_seen) VALUES (?, ?, ?, ?, datetime('now'))", id, clean, secretNorm, isAdmin);
+        this.adminLog({ id, username: clean }, "new_user", "Registered @" + clean);
         const sess = this.createSession(id);
         return j({ user: { id, username: clean, createdAt: new Date().toISOString(), isAdmin: !!isAdmin, online: true }, token: sess });
       }
@@ -421,6 +422,15 @@ export class Hub {
           if (!target) return jerr("User not found");
           if (target.username === "admin") return jerr("Cannot restrict primary admin");
           this.sql("UPDATE users SET restriction_level = ? WHERE id = ?", level, restrict[1]);
+          const labels = { 0: "unrestrict", 1: "restrict_L1", 2: "restrict_L2" };
+          this.adminLog(me, labels[level] || "restrict", "@" + target.username + " set to " + (labels[level] || level));
+          // Auto-resolve open reports against this user when restricted
+          if (level > 0) {
+            this.sql(
+              "UPDATE reports SET resolved = 1, resolved_by = ?, resolve_action = ?, resolved_at = datetime('now') WHERE reported_id = ? AND resolved = 0",
+              me.id, labels[level] || ("L"+level), restrict[1]
+            );
+          }
           return j({ ok: true, restrictionLevel: level });
         }
         // Primary admin only: hard delete user
@@ -431,6 +441,11 @@ export class Hub {
           if (!target) return jerr("User not found");
           if (target.username === "admin") return jerr("Cannot delete primary admin");
           const uid = delUser[1];
+          this.adminLog(me, "delete_user", "Deleted @" + target.username);
+          this.sql(
+            "UPDATE reports SET resolved = 1, resolved_by = ?, resolve_action = 'delete_user', resolved_at = datetime('now') WHERE reported_id = ? AND resolved = 0",
+            me.id, uid
+          );
           this.sql("DELETE FROM sessions WHERE user_id = ?", uid);
           this.sql("DELETE FROM contacts WHERE owner_id = ? OR contact_id = ?", uid, uid);
           this.sql("DELETE FROM blocks WHERE blocker_id = ? OR blocked_id = ?", uid, uid);
@@ -442,13 +457,15 @@ export class Hub {
         // Reports list (admins)
         if (path === "/admin/reports" && method === "GET") {
           const rows = this.sql(`
-            SELECT r.id, r.reason, r.created_at, r.resolved,
+            SELECT r.id, r.reason, r.created_at, r.resolved, r.resolved_by, r.resolve_action, r.resolved_at,
                    ru.username AS reporter_username, ru.id AS reporter_id,
                    du.username AS reported_username, du.id AS reported_id,
-                   du.restriction_level
+                   du.restriction_level,
+                   resolver.username AS resolver_username
             FROM reports r
             JOIN users ru ON ru.id = r.reporter_id
             JOIN users du ON du.id = r.reported_id
+            LEFT JOIN users resolver ON resolver.id = r.resolved_by
             ORDER BY r.resolved ASC, r.created_at DESC
             LIMIT 200
           `).toArray();
@@ -457,6 +474,9 @@ export class Hub {
             reason: r.reason,
             createdAt: r.created_at,
             resolved: !!r.resolved,
+            resolveAction: r.resolve_action || null,
+            resolvedAt: r.resolved_at || null,
+            resolver: r.resolved_by ? { id: r.resolved_by, username: r.resolver_username } : null,
             reporter: { id: r.reporter_id, username: r.reporter_username },
             reported: {
               id: r.reported_id,
@@ -467,8 +487,46 @@ export class Hub {
         }
         if (path.match(/^\/admin\/reports\/[^/]+\/resolve$/) && method === "POST") {
           const rid = path.split("/")[3];
-          this.sql("UPDATE reports SET resolved = 1 WHERE id = ?", rid);
-          return j({ ok: true });
+          const action = String(body.action || "no_action").slice(0, 40);
+          // no_action | restrict_L1 | restrict_L2 | delete_user
+          const report = this.sql("SELECT * FROM reports WHERE id = ?", rid).toArray()[0];
+          if (!report) return jerr("Report not found", 404);
+          if (action === "restrict_L1" || action === "restrict_L2") {
+            if (me.username !== "admin") return jerr("Primary admin only for restrictions", 403);
+            const level = action === "restrict_L1" ? 1 : 2;
+            this.sql("UPDATE users SET restriction_level = ? WHERE id = ?", level, report.reported_id);
+          } else if (action === "delete_user") {
+            if (me.username !== "admin") return jerr("Primary admin only for delete", 403);
+            const t = this.toUser(this.sql("SELECT * FROM users WHERE id = ?", report.reported_id).toArray()[0]);
+            if (t && t.username !== "admin") {
+              this.sql("DELETE FROM sessions WHERE user_id = ?", report.reported_id);
+              this.sql("DELETE FROM contacts WHERE owner_id = ? OR contact_id = ?", report.reported_id, report.reported_id);
+              this.sql("DELETE FROM room_members WHERE user_id = ?", report.reported_id);
+              this.sql("DELETE FROM room_admins WHERE user_id = ?", report.reported_id);
+              this.sql("DELETE FROM users WHERE id = ?", report.reported_id);
+            }
+          }
+          this.sql(
+            "UPDATE reports SET resolved = 1, resolved_by = ?, resolve_action = ?, resolved_at = datetime('now') WHERE id = ?",
+            me.id, action, rid
+          );
+          const reportedName = this.sql("SELECT username FROM users WHERE id = ?", report.reported_id).toArray()[0]?.username
+            || report.reported_id;
+          this.adminLog(me, "report_resolved", "Report on @" + reportedName + " → " + action);
+          return j({ ok: true, action });
+        }
+        // Administrative history (primary admin preferred, any admin can view)
+        if (path === "/admin/history" && method === "GET") {
+          const rows = this.sql(
+            "SELECT * FROM admin_logs ORDER BY created_at DESC LIMIT 300"
+          ).toArray();
+          return j(rows.map((r) => ({
+            id: r.id,
+            actor: r.actor_username,
+            action: r.action,
+            detail: r.detail,
+            createdAt: r.created_at,
+          })));
         }
         return jerr("Not found", 404);
       }
@@ -997,7 +1055,9 @@ export class Hub {
         this.sql("INSERT OR IGNORE INTO room_members (room_id, user_id, added_by) VALUES (?, ?, ?)", id, mid, me.id);
       }
     }
-    return this.getRoom(id);
+    const created = this.getRoom(id);
+    this.adminLog(me, "room_created", (visibility || "public") + ' room "' + name + '" by @' + (me.username || "?"));
+    return created;
   }
 
   purgeRoomData(roomId) {

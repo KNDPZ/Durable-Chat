@@ -144,6 +144,9 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
 .history-msg{padding:8px 0;border-bottom:1px solid var(--surface2);font-size:.88rem}
 .history-meta{font-size:.72rem;color:var(--muted)}
 .report-row{border-left:3px solid var(--danger)}
+.report-resolved{border-left:3px solid var(--success)!important;background:rgba(76,175,80,.08)}
+.badge-resolved{background:rgba(76,175,80,.25);color:#81c784;font-size:.7rem;padding:2px 6px;border-radius:999px}
+
 
 @media(max-width:720px){
   .sidebar{width:100%;max-width:none}
@@ -350,6 +353,7 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
     <button class="sub-tab" data-admin="admins">Admins</button>
     <button class="sub-tab" data-admin="lookup">Lookup</button>
     <button class="sub-tab" data-admin="reports">Reports</button>
+    <button class="sub-tab" data-admin="history">Admin history</button>
   </div>
   <div id="admin-online"><div class="empty">Loading…</div></div>
   <div id="admin-users" style="display:none"></div>
@@ -359,6 +363,7 @@ input:focus,textarea:focus{border-color:var(--accent-hi)}
     <div id="adminSearchResults"><div class="empty">Type to search</div></div>
   </div>
   <div id="admin-reports" style="display:none"></div>
+  <div id="admin-history" style="display:none"></div>
   <div class="modal-actions"><button class="btn-ghost" id="closeAdmin">Close</button></div>
 </div></div>
 
