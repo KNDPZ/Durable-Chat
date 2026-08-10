@@ -230,7 +230,7 @@ $("#drawerAdmin").onclick = () => { closeDrawer(); openModal("adminModal"); load
 
 function openModal(id) { $("#" + id).classList.add("open"); }
 function closeModal(id) { $("#" + id).classList.remove("open"); }
-["authModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal","roomSettingsModal","notifModal"].forEach((id) => {
+["authModal","resolveReportModal","createRoomModal","contactsModal","searchModal","adminModal","membersModal","adminUserModal","reportModal","forwardModal","editHistoryModal","recoverModal","roomSettingsModal","notifModal"].forEach((id) => {
   const el = $("#" + id);
   if (el) el.onclick = (e) => { if (e.target === el) closeModal(id); };
 });
@@ -1293,32 +1293,55 @@ async function doAdminSearch() {
 function openResolveReport(reportId, userId) {
   const isPrimary = me && me.username === "admin";
   const choices = [
-    { action: "no_action", label: "Resolve: no action" },
+    { action: "no_action", label: "Resolve: no action", cls: "btn" },
   ];
   if (isPrimary) {
     choices.push(
-      { action: "restrict_L1", label: "Restrict L1" },
-      { action: "restrict_L2", label: "Restrict L2" },
-      { action: "delete_user", label: "Delete user" },
+      { action: "restrict_L1", label: "Restrict L1", cls: "btn" },
+      { action: "restrict_L2", label: "Restrict L2", cls: "btn" },
+      { action: "delete_user", label: "Delete user", cls: "btn btn-danger" },
     );
   }
-  const pick = prompt(
-    "Resolve report:\n" + choices.map((c, i) => (i + 1) + ") " + c.label).join("\n") + "\n\nEnter number:",
-    "1"
-  );
-  if (pick == null) return;
-  const idx = parseInt(pick, 10) - 1;
-  if (idx < 0 || idx >= choices.length) { showError("Invalid choice"); return; }
-  const action = choices[idx].action;
-  if (action === "delete_user" && !confirm("Permanently delete this user?")) return;
-  api("/admin/reports/" + reportId + "/resolve", {
-    method: "POST",
-    body: JSON.stringify({ action }),
-  }).then(() => {
-    showError("Report resolved");
-    loadAdminPanel("reports");
-  }).catch((e) => showError(e.message));
+  $("#resolveReportDesc").textContent = "Select how to resolve this report. The reports list will stay open.";
+  const box = $("#resolveReportActions");
+  box.innerHTML = choices.map((c) =>
+    `<button class="${c.cls}" style="width:100%" data-action="${c.action}">${c.label}</button>`
+  ).join("");
+  box.querySelectorAll("button").forEach((btn) => {
+    btn.onclick = async () => {
+      const action = btn.dataset.action;
+      if (action === "delete_user") {
+        if (!window.confirm("Permanently delete this user?")) return;
+        await new Promise((r) => setTimeout(r, 150)); // avoid click-through closing modals
+      }
+      btn.disabled = true;
+      try {
+        await api("/admin/reports/" + reportId + "/resolve", {
+          method: "POST",
+          body: JSON.stringify({ action }),
+        });
+        closeModal("resolveReportModal");
+        // Keep admin modal open and refresh reports in place
+        openModal("adminModal");
+        // ensure reports tab active
+        document.querySelectorAll(".sub-tab").forEach((t) => {
+          t.classList.toggle("active", t.dataset.admin === "reports");
+        });
+        ["online","users","admins","lookup","reports","history"].forEach((p) => {
+          const el = $("#admin-" + p);
+          if (el) el.style.display = p === "reports" ? "block" : "none";
+        });
+        await loadAdminPanel("reports");
+      } catch (e) {
+        showError(e.message);
+        btn.disabled = false;
+      }
+    };
+  });
+  openModal("resolveReportModal");
 }
+$("#cancelResolveReport").onclick = () => closeModal("resolveReportModal");
+
 
 async function openAdminUser(userId) {
   try {
